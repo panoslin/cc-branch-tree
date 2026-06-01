@@ -1,0 +1,2 @@
+{"type":"user","uuid":"s1","parentUuid":null,"sessionId":"solo","cwd":"/work/proj2","gitBranch":"dev","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"solo first message here"}}
+{"type":"assistant","uuid":"s2","parentUuid":"s1","sessionId":"solo","timestamp":"2026-06-01T00:00:02.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}

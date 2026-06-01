@@ -1,0 +1,3 @@
+{"type":"user","uuid":"a1","parentUuid":null,"sessionId":"root","cwd":"/work/proj1","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"hello from root"}}
+{"type":"assistant","uuid":"a2","parentUuid":"a1","sessionId":"root","timestamp":"2026-06-01T00:00:01.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}
+{"type":"custom-title","sessionId":"root","title":"Root Session"}

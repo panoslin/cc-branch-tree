@@ -1,0 +1,2 @@
+{"type":"user","uuid":"g1","parentUuid":null,"sessionId":"orphan","cwd":"/work/proj1","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"forkedFrom":{"sessionId":"ghost","messageUuid":"g1"},"message":{"role":"user","content":"inherited from a deleted session"}}
+{"type":"user","uuid":"e1","parentUuid":"g1","sessionId":"orphan","timestamp":"2026-06-01T00:01:00.000Z","isSidechain":false,"message":{"role":"user","content":"orphan own message"}}

@@ -1,0 +1,4 @@
+{"type":"user","uuid":"a1","parentUuid":null,"sessionId":"grand","cwd":"/work/proj1","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"forkedFrom":{"sessionId":"child","messageUuid":"a1"},"message":{"role":"user","content":"hello from root"}}
+{"type":"assistant","uuid":"a2","parentUuid":"a1","sessionId":"grand","timestamp":"2026-06-01T00:00:01.000Z","isSidechain":false,"forkedFrom":{"sessionId":"child","messageUuid":"a2"},"message":{"role":"assistant","content":[{"type":"text","text":"hi"}]}}
+{"type":"user","uuid":"b1","parentUuid":"a2","sessionId":"grand","timestamp":"2026-06-01T00:02:00.000Z","isSidechain":false,"forkedFrom":{"sessionId":"child","messageUuid":"b1"},"message":{"role":"user","content":"child question"}}
+{"type":"user","uuid":"c1","parentUuid":"b1","sessionId":"grand","timestamp":"2026-06-01T00:05:00.000Z","isSidechain":false,"message":{"role":"user","content":"grandchild question"}}
