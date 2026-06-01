@@ -2,5 +2,6 @@
   "name": "cc-branch-tree",
   "description": "Visualize the Claude Code conversation fork tree across projects and resume any branch in a new window",
   "version": "0.1.0",
+  "author": {"name": "Panos"},
   "commands": "./commands/"
 }
