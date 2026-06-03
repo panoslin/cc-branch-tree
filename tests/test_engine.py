@@ -157,8 +157,8 @@ class TestCLI(unittest.TestCase):
             rc = cc_tree.main(["cc_tree.py", "resume", "root"])
         out = buf.getvalue()
         self.assertEqual(rc, 0)
-        self.assertIn("claude --resume root", out)
-        self.assertIn('cd "/work/proj1"', out)
+        self.assertIn("/resume root", out)                              # in-session form (clipboard)
+        self.assertIn('cd "/work/proj1" && claude --resume root', out)  # new-terminal hint
 
     def test_clipboard_guarded_in_tests(self):
         self.assertFalse(cc_tree._copy_to_clipboard("x"))   # CC_NO_CLIPBOARD is set

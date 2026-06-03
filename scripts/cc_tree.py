@@ -515,10 +515,12 @@ def cmd_resume(args):
     if launch:
         launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launch.sh")
         os.execv("/bin/bash", ["/bin/bash", launcher, cwd, sid])
-    cmd = 'cd "%s" && claude --resume %s' % (cwd, sid)
-    if _copy_to_clipboard(cmd):
-        print("✓ Copied to clipboard — paste to run:")
-    print(cmd)
+    resume_here = "/resume %s" % sid
+    new_window = 'cd "%s" && claude --resume %s' % (cwd, sid)
+    if _copy_to_clipboard(resume_here):
+        print("✓ Copied — paste into THIS prompt to switch in-session:")
+    print(resume_here)
+    print("  (new terminal in its own dir: %s)" % new_window)
     return 0
 
 
