@@ -98,9 +98,14 @@ class TestRenderResolve(unittest.TestCase):
 
     def test_depth_first_order(self):
         i = self.ordered.index
+        # parent always precedes its own descendants (depth-first)
         self.assertLess(i("root"), i("child"))
         self.assertLess(i("child"), i("grand"))
-        self.assertLess(i("grand"), i("sib"))
+        self.assertLess(i("root"), i("sib"))
+
+    def test_siblings_sorted_recent_first(self):
+        # sib (last 00:03) is more recent than child (last 00:02) -> sib ranks first
+        self.assertLess(self.ordered.index("sib"), self.ordered.index("child"))
 
     def test_indent_grand_under_child(self):
         def indent(sid):
@@ -120,9 +125,10 @@ class TestRenderResolve(unittest.TestCase):
         def line(sid):
             tag = "[%d]" % self.ordered.index(sid)
             return next(l for l in self.text.splitlines() if tag in l)
-        # root's children: child (not last) -> ├─ ; sib (last) -> └─
-        self.assertIn("├─", line("child"))
-        self.assertIn("└─", line("sib"))
+        # whichever of root's two children renders last gets └─, the other ├─
+        kids = sorted(("child", "sib"), key=self.ordered.index)
+        self.assertIn("├─", line(kids[0]))
+        self.assertIn("└─", line(kids[-1]))
         # grand is nested deeper than child
         self.assertGreater(line("grand").index("["), line("child").index("["))
 
@@ -136,6 +142,30 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("claude --resume root", out)
         self.assertIn('cd "/work/proj1"', out)
+
+
+class TestFilter(unittest.TestCase):
+    def setUp(self):
+        self.sessions = cc_tree.load_sessions()
+        self.children, self.roots = cc_tree.build_forest(
+            self.sessions, cc_tree.build_owner_index(self.sessions))
+
+    def test_parse_filter_args(self):
+        self.assertEqual(cc_tree.parse_filter_args(["10d"]), (None, 10 * 86400))
+        self.assertEqual(cc_tree.parse_filter_args(["3h"]), (None, 3 * 3600))
+        self.assertEqual(cc_tree.parse_filter_args(["30m"]), (None, 30 * 60))
+        self.assertEqual(cc_tree.parse_filter_args(["所有笔记"]), ("所有笔记", None))
+        self.assertEqual(cc_tree.parse_filter_args(["EB1", "2w"]), ("EB1", 2 * 604800))
+        self.assertEqual(cc_tree.parse_filter_args([]), (None, None))
+
+    def test_time_window_keeps_recent_and_ancestors(self):
+        now = cc_tree._epoch("2026-06-01T00:06:00")  # 2-min window -> cutoff 00:04
+        _, ordered = cc_tree.render(
+            self.sessions, self.children, self.roots, within_seconds=120, now=now)
+        for keep in ("root", "child", "grand"):   # grand recent; root+child kept as ancestors
+            self.assertIn(keep, ordered)
+        for drop in ("sib", "orphan", "solo", "caveat", "cwdpick"):
+            self.assertNotIn(drop, ordered)
 
 
 if __name__ == "__main__":

@@ -226,29 +226,64 @@ def _idle(ts):
     return "%dd" % int(secs // 86400)
 
 
-def _sort_key(sessions):
-    return lambda sid: (sessions[sid].created or "", sid)
+def _epoch(ts):
+    if not ts:
+        return 0
+    try:
+        return calendar.timegm(time.strptime(ts[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return 0
 
 
-def render(sessions, children, roots, filter_str=None):
+def _subtree_last_epoch(sid, sessions, children, memo):
+    """Most-recent activity epoch within this node's subtree (including itself)."""
+    if sid in memo:
+        return memo[sid]
+    best = _epoch(sessions[sid].last)
+    for c in children.get(sid, ()):
+        v = _subtree_last_epoch(c, sessions, children, memo)
+        if v > best:
+            best = v
+    memo[sid] = best
+    return best
+
+
+def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None):
+    memo = {}
+    cutoff = None
+    if within_seconds:
+        cutoff = (now if now is not None else time.time()) - within_seconds
+
+    def keep(sid):
+        # Keep a node if it OR any descendant is within the window (preserves lineage).
+        return cutoff is None or _subtree_last_epoch(sid, sessions, children, memo) >= cutoff
+
+    def recency(sid):
+        return _epoch(sessions[sid].last)
+
     by_proj = {}
     for sid in roots:
-        proj = sessions[sid].cwd or "(unknown)"
-        by_proj.setdefault(proj, []).append(sid)
+        if not keep(sid):
+            continue
+        by_proj.setdefault(sessions[sid].cwd or "(unknown)", []).append(sid)
+
+    def proj_recency(proj):
+        return max(_subtree_last_epoch(r, sessions, children, memo) for r in by_proj[proj])
+
     lines = []
     ordered = []
-    for proj in sorted(by_proj):
+    for proj in sorted(by_proj, key=proj_recency, reverse=True):
         if filter_str and filter_str.lower() not in proj.lower():
             continue
         lines.append("\U0001F4C1 %s" % proj)
-        for sid in sorted(by_proj[proj], key=_sort_key(sessions)):
-            _emit(sid, sessions, children, lines, ordered)
+        for sid in sorted(by_proj[proj], key=recency, reverse=True):
+            _emit(sid, sessions, children, lines, ordered, keep)
         lines.append("")
-    text = "\n".join(lines).rstrip()
-    return text, ordered
+    return "\n".join(lines).rstrip(), ordered
 
 
-def _emit(sid, sessions, children, lines, ordered, child_prefix="  ", is_root=True, is_last=True):
+def _emit(sid, sessions, children, lines, ordered, keep,
+          child_prefix="  ", is_root=True, is_last=True):
     s = sessions[sid]
     idx = len(ordered)
     ordered.append(sid)
@@ -264,9 +299,10 @@ def _emit(sid, sessions, children, lines, ordered, child_prefix="  ", is_root=Tr
         extra += "  ↳forked after %d msg" % d
     lines.append("%s[%d] %s · %s · %dmsg · %s%s"
                  % (line_prefix, idx, s.sid[:8], s.label[:32], s.msgs, _idle(s.last), extra))
-    kids = sorted(children.get(sid, []), key=_sort_key(sessions))
+    kids = [c for c in children.get(sid, ()) if keep(c)]
+    kids.sort(key=lambda c: _epoch(sessions[c].last), reverse=True)
     for i, c in enumerate(kids):
-        _emit(c, sessions, children, lines, ordered, next_prefix,
+        _emit(c, sessions, children, lines, ordered, keep, next_prefix,
               is_root=False, is_last=(i == len(kids) - 1))
 
 
@@ -319,11 +355,33 @@ def _needs_owner(sessions):
     return any(s.forked_from_sid is None and s.inherited_in_order for s in sessions.values())
 
 
-def cmd_render(filter_str=None):
+_DURATION_RE = re.compile(r"^(\d+)([mhdw])$")
+_DURATION_MULT = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
+
+
+def parse_filter_args(tokens):
+    """Split CLI tokens into (project_filter, within_seconds).
+
+    A token like 10d / 3h / 2w / 30m sets the time window; everything else
+    joins into a project-name substring filter.
+    """
+    project = []
+    within = None
+    for tok in tokens:
+        m = _DURATION_RE.match(tok.strip())
+        if m:
+            within = int(m.group(1)) * _DURATION_MULT[m.group(2)]
+        else:
+            project.append(tok)
+    return (" ".join(project).strip() or None, within)
+
+
+def cmd_render(arg_tokens=None):
+    filter_str, within = parse_filter_args(arg_tokens or [])
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
     children, roots = build_forest(sessions, owner)
-    text, ordered = render(sessions, children, roots, filter_str)
+    text, ordered = render(sessions, children, roots, filter_str, within)
     write_last_tree(ordered, sessions)
     print(text if text else "No sessions found.")
     return 0
@@ -348,7 +406,7 @@ def cmd_resume(args):
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "render"
     if cmd == "render":
-        return cmd_render(" ".join(argv[2:]).strip() or None)
+        return cmd_render(argv[2:])
     if cmd == "resume":
         return cmd_resume(argv[2:])
     print("unknown command: %s (use 'render' or 'resume')" % cmd)

@@ -1,6 +1,6 @@
 ---
-description: Show the conversation fork tree across all projects (grouped by project, nested by fork)
-argument-hint: "[project filter]"
+description: Show the conversation fork tree across all projects (recent-first; optional time window + project filter)
+argument-hint: "[10d|3h|2w|30m] [project]"
 allowed-tools: Bash(python3 *)
 model: haiku
 effort: low
