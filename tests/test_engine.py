@@ -167,12 +167,13 @@ class TestFilter(unittest.TestCase):
             self.sessions, cc_tree.build_owner_index(self.sessions))
 
     def test_parse_filter_args(self):
-        self.assertEqual(cc_tree.parse_filter_args(["10d"]), (None, 10 * 86400))
-        self.assertEqual(cc_tree.parse_filter_args(["3h"]), (None, 3 * 3600))
-        self.assertEqual(cc_tree.parse_filter_args(["30m"]), (None, 30 * 60))
-        self.assertEqual(cc_tree.parse_filter_args(["所有笔记"]), ("所有笔记", None))
-        self.assertEqual(cc_tree.parse_filter_args(["EB1", "2w"]), ("EB1", 2 * 604800))
-        self.assertEqual(cc_tree.parse_filter_args([]), (None, None))
+        self.assertEqual(cc_tree.parse_filter_args(["10d"]), (None, 10 * 86400, False))
+        self.assertEqual(cc_tree.parse_filter_args(["30m"]), (None, 30 * 60, False))
+        self.assertEqual(cc_tree.parse_filter_args(["所有笔记"]), ("所有笔记", None, False))
+        self.assertEqual(cc_tree.parse_filter_args(["EB1", "2w"]), ("EB1", 2 * 604800, False))
+        self.assertEqual(cc_tree.parse_filter_args(["all"]), (None, None, True))
+        self.assertEqual(cc_tree.parse_filter_args(["10d", "all"]), (None, 10 * 86400, True))
+        self.assertEqual(cc_tree.parse_filter_args([]), (None, None, False))
 
     def test_time_window_keeps_recent_and_ancestors(self):
         now = cc_tree._epoch("2026-06-01T00:06:00")  # 2-min window -> cutoff 00:04
@@ -182,6 +183,21 @@ class TestFilter(unittest.TestCase):
             self.assertIn(keep, ordered)
         for drop in ("sib", "orphan", "solo", "caveat", "cwdpick"):
             self.assertNotIn(drop, ordered)
+
+    def test_command_sessions_auto_hidden(self):
+        _, ordered = cc_tree.render(self.sessions, self.children, self.roots)
+        self.assertNotIn("cmdrun", ordered)        # /deploy session auto-hidden by default
+        _, all_ordered = cc_tree.render(self.sessions, self.children, self.roots, show_all=True)
+        self.assertIn("cmdrun", all_ordered)        # 'all' reveals it
+
+    def test_view_persistence(self):
+        path = cc_tree._view_path()
+        try:
+            cc_tree.save_view("proj", 864000, True)
+            self.assertEqual(cc_tree.load_view(), ("proj", 864000, True))
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
 
 
 class TestHidden(unittest.TestCase):
@@ -239,9 +255,11 @@ class TestHidden(unittest.TestCase):
                 os.remove(path)
 
     def test_hide_renders_updated_tree(self):
-        path = cc_tree._hidden_path()
+        hp, vp = cc_tree._hidden_path(), cc_tree._view_path()
         try:
             cc_tree.save_hidden(set())
+            if os.path.exists(vp):
+                os.remove(vp)                    # no saved view -> default render
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
                 cc_tree.cmd_hide(["sib"])
@@ -249,8 +267,9 @@ class TestHidden(unittest.TestCase):
             self.assertIn("Hidden", out)         # confirmation line
             self.assertIn("\U0001F4C1", out)     # the updated tree is printed after it
         finally:
-            if os.path.exists(path):
-                os.remove(path)
+            for p in (hp, vp):
+                if os.path.exists(p):
+                    os.remove(p)
 
 
 if __name__ == "__main__":

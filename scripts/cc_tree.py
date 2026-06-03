@@ -266,9 +266,19 @@ def _apply_hidden(sessions, children, roots, hidden):
     return vchildren, vroots
 
 
-def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None, hidden=None):
-    if hidden:
-        children, roots = _apply_hidden(sessions, children, roots, hidden)
+def _is_command_session(s):
+    """True if the session's first message was a slash-command invocation (label '/foo')."""
+    return bool(s.label) and s.label.startswith("/")
+
+
+def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None,
+           hidden=None, show_all=False):
+    user_hidden = set(hidden or ())
+    cmd_hidden = set() if show_all else {sid for sid, s in sessions.items()
+                                         if _is_command_session(s)}
+    effective = user_hidden | cmd_hidden
+    if effective:
+        children, roots = _apply_hidden(sessions, children, roots, effective)
     memo = {}
     cutoff = None
     if within_seconds:
@@ -335,13 +345,19 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
             lines.append(line.rstrip())
 
     text = "\n".join(lines).rstrip()
-    if hidden:
-        shown = sorted(h for h in hidden if h in sessions)
-        if shown:
-            preview = ", ".join("%s %s" % (h[:8], sessions[h].label[:18]) for h in shown[:8])
-            more = " …" if len(shown) > 8 else ""
-            text += ("\n\n· hidden (%d): %s%s  —  /cc-branch-tree:unhide <id|all> to restore"
-                     % (len(shown), preview, more))
+    notes = []
+    uh = sorted(h for h in user_hidden if h in sessions)
+    if uh:
+        preview = ", ".join("%s %s" % (h[:8], sessions[h].label[:18]) for h in uh[:8])
+        more = " …" if len(uh) > 8 else ""
+        notes.append("· hidden (%d): %s%s  —  /cc-branch-tree:unhide <id|all> to restore"
+                     % (len(uh), preview, more))
+    auto = len(cmd_hidden - user_hidden)
+    if auto:
+        notes.append("· %d command session(s) auto-hidden  —  /cc-branch-tree:tree all to show"
+                     % auto)
+    if notes:
+        text += "\n\n" + "\n".join(notes)
     return text, ordered
 
 
@@ -384,6 +400,25 @@ def save_hidden(hidden):
         json.dump(sorted(hidden), fh)
 
 
+def _view_path():
+    return os.path.join(data_dir(), "last_view.json")
+
+
+def save_view(filter_str, within, show_all):
+    with open(_view_path(), "w", encoding="utf-8") as fh:
+        json.dump({"filter": filter_str, "within": within, "show_all": show_all}, fh)
+
+
+def load_view():
+    """Return (filter_str, within_seconds, show_all) from the last /tree, or defaults."""
+    try:
+        with open(_view_path(), encoding="utf-8") as fh:
+            v = json.load(fh)
+        return v.get("filter"), v.get("within"), bool(v.get("show_all"))
+    except (OSError, json.JSONDecodeError):
+        return None, None, False
+
+
 def resolve(selector, sessions=None):
     """Resolve an index / sid-prefix / label-substring to (sid, cwd), or None."""
     selector = (selector or "").strip()
@@ -416,34 +451,40 @@ _DURATION_MULT = {"m": 60, "h": 3600, "d": 86400, "w": 604800}
 
 
 def parse_filter_args(tokens):
-    """Split CLI tokens into (project_filter, within_seconds).
+    """Split CLI tokens into (project_filter, within_seconds, show_all).
 
-    A token like 10d / 3h / 2w / 30m sets the time window; everything else
-    joins into a project-name substring filter.
+    'all' also shows command-runner sessions; a token like 10d/3h/2w/30m sets the
+    time window; everything else joins into a project-name substring filter.
     """
     project = []
     within = None
+    show_all = False
     for tok in tokens:
-        m = _DURATION_RE.match(tok.strip())
-        if m:
+        t = tok.strip()
+        if t.lower() == "all":
+            show_all = True
+        elif _DURATION_RE.match(t):
+            m = _DURATION_RE.match(t)
             within = int(m.group(1)) * _DURATION_MULT[m.group(2)]
         else:
             project.append(tok)
-    return (" ".join(project).strip() or None, within)
+    return (" ".join(project).strip() or None, within, show_all)
 
 
-def _print_tree(sessions, children, roots, hidden=None, filter_str=None, within=None):
-    text, ordered = render(sessions, children, roots, filter_str, within, hidden=hidden)
+def _print_tree(sessions, children, roots, hidden=None, filter_str=None, within=None, show_all=False):
+    text, ordered = render(sessions, children, roots, filter_str, within,
+                           hidden=hidden, show_all=show_all)
     write_last_tree(ordered, sessions)
     print(text if text else "No sessions found.")
 
 
 def cmd_render(arg_tokens=None):
-    filter_str, within = parse_filter_args(arg_tokens or [])
+    filter_str, within, show_all = parse_filter_args(arg_tokens or [])
+    save_view(filter_str, within, show_all)
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
     children, roots = build_forest(sessions, owner)
-    _print_tree(sessions, children, roots, load_hidden(), filter_str, within)
+    _print_tree(sessions, children, roots, load_hidden(), filter_str, within, show_all)
     return 0
 
 
@@ -494,7 +535,8 @@ def cmd_hide(selectors):
         out += " | no match: " + ", ".join(missing)
     print(out)
     print()
-    _print_tree(sessions, children, roots, hidden)   # show the updated tree
+    f, w, sa = load_view()
+    _print_tree(sessions, children, roots, hidden, f, w, sa)   # re-render the same view
     return 0
 
 
@@ -521,7 +563,8 @@ def cmd_unhide(selectors):
         out += ": " + ", ".join(s[:8] for s in removed)
     print(out)
     print()
-    _print_tree(sessions, children, roots, hidden)   # show the updated tree
+    f, w, sa = load_view()
+    _print_tree(sessions, children, roots, hidden, f, w, sa)   # re-render the same view
     return 0
 
 
