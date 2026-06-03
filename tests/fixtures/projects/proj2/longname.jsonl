@@ -1,0 +1,2 @@
+{"type":"user","uuid":"ln1","parentUuid":null,"sessionId":"longname","cwd":"/work/proj2","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"start"}}
+{"type":"custom-title","sessionId":"longname","title":"This is a very long session title that exceeds thirty-four characters easily"}

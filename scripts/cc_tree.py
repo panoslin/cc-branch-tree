@@ -24,7 +24,6 @@ import os
 import re
 import sys
 import time
-import unicodedata
 
 MSG_TYPES = ("user", "assistant")
 
@@ -267,26 +266,6 @@ def _apply_hidden(sessions, children, roots, hidden):
     return vchildren, vroots
 
 
-def _dw(s):
-    """Monospace display width (CJK / full-width characters count as 2 cells)."""
-    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
-
-
-def _trunc(s, width):
-    out, used = "", 0
-    for c in s:
-        cw = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
-        if used + cw > width:
-            return out + "…"
-        out += c
-        used += cw
-    return out
-
-
-def _padr(s, width):
-    return s + " " * max(0, width - _dw(s))
-
-
 def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None, hidden=None):
     if hidden:
         children, roots = _apply_hidden(sessions, children, roots, hidden)
@@ -338,10 +317,9 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
 
     lines = []
     if rows:
+        # Aligned left columns: index, session-id, time. The full name (with tree
+        # prefix) is last so it can be any length without breaking alignment.
         idx_w = max(len("[%d]" % r["idx"]) for r in rows)
-        for r in rows:
-            r["name"] = r["prefix"] + _trunc(r["label"], 34)
-        name_w = max(_dw(r["name"]) for r in rows)
         time_w = max(len(r["time"]) for r in rows)
         cur = None
         for r in rows:
@@ -351,10 +329,9 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
                 lines.append("\U0001F4C1 %s" % r["proj"])
                 cur = r["proj"]
             idx_s = ("[%d]" % r["idx"]).rjust(idx_w)
-            line = "  %s  %s  %s  %s" % (idx_s, r["sid"], _padr(r["name"], name_w),
-                                         r["time"].rjust(time_w))
-            if r["branches"]:
-                line += "  ⑂%d" % r["branches"]
+            branch = ("  ⑂%d" % r["branches"]) if r["branches"] else ""
+            line = "  %s  %s  %s  %s%s" % (idx_s, r["sid"], r["time"].rjust(time_w),
+                                           r["prefix"] + r["label"], branch)
             lines.append(line.rstrip())
 
     text = "\n".join(lines).rstrip()

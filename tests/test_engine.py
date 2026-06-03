@@ -127,6 +127,11 @@ class TestRenderResolve(unittest.TestCase):
     def test_branch_count_shown(self):
         self.assertIn("⑂", self.text)   # nodes with children show ⑂N
 
+    def test_full_name_not_truncated(self):
+        title = "This is a very long session title that exceeds thirty-four characters easily"
+        self.assertIn(title, self.text)      # shown in full
+        self.assertNotIn("…", self.text)     # no truncation ellipsis anywhere
+
     def test_resolve(self):
         ri = self.ordered.index("root")
         self.assertEqual(cc_tree.resolve(str(ri), self.sessions)[0], "root")
