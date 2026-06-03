@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased (v1.1 work)
+
+- **`/inspect <selector>`**: drill into one session's internal `/rewind` branches (message-level `parentUuid` tree); marks the live path vs other paths, walks to the first text-bearing message for previews, sorts by significance, caps at 12, hides trivial single-message edits.
+- **Incremental parse cache**: `load_sessions()` skips transcripts unchanged since last run via an `(mtime, size)` cache (`parse_cache.json`); warm renders ~16× faster. `CC_NO_CACHE=1` disables.
+- **Persistent install**: documented skills-dir symlink (`~/.claude/skills/cc-branch-tree` → repo) so the plugin loads every session without `--plugin-dir`.
+- 35 `unittest` cases.
+
 ## v0.2.0 — 2026-06-03
 
 Cross-project navigation, filtering, soft-delete, and clipboard-based in-session resume.
