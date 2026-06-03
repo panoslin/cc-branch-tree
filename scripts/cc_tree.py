@@ -253,7 +253,30 @@ def _subtree_last_epoch(sid, sessions, children, memo):
     return best
 
 
-def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None):
+def _apply_hidden(sessions, children, roots, hidden):
+    """Drop hidden sessions; re-parent their children to the nearest visible ancestor."""
+    parent = {}
+    for p, kids in children.items():
+        for k in kids:
+            parent[k] = p
+    vchildren = {}
+    vroots = []
+    for sid in sessions:
+        if sid in hidden:
+            continue
+        p = parent.get(sid)
+        while p is not None and p in hidden:
+            p = parent.get(p)
+        if p is None:
+            vroots.append(sid)
+        else:
+            vchildren.setdefault(p, []).append(sid)
+    return vchildren, vroots
+
+
+def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None, hidden=None):
+    if hidden:
+        children, roots = _apply_hidden(sessions, children, roots, hidden)
     memo = {}
     cutoff = None
     if within_seconds:
@@ -284,7 +307,15 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
         for sid in sorted(by_proj[proj], key=recency, reverse=True):
             _emit(sid, sessions, children, lines, ordered, keep)
         lines.append("")
-    return "\n".join(lines).rstrip(), ordered
+    text = "\n".join(lines).rstrip()
+    if hidden:
+        shown = sorted(h for h in hidden if h in sessions)
+        if shown:
+            preview = ", ".join("%s %s" % (h[:8], sessions[h].label[:18]) for h in shown[:8])
+            more = " …" if len(shown) > 8 else ""
+            text += ("\n\n· hidden (%d): %s%s  —  /cc-branch-tree:unhide <id|all> to restore"
+                     % (len(shown), preview, more))
+    return text, ordered
 
 
 def _emit(sid, sessions, children, lines, ordered, keep,
@@ -331,6 +362,23 @@ def load_last_tree():
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
         return []
+
+
+def _hidden_path():
+    return os.path.join(data_dir(), "hidden.json")
+
+
+def load_hidden():
+    try:
+        with open(_hidden_path(), encoding="utf-8") as fh:
+            return set(json.load(fh))
+    except (OSError, json.JSONDecodeError):
+        return set()
+
+
+def save_hidden(hidden):
+    with open(_hidden_path(), "w", encoding="utf-8") as fh:
+        json.dump(sorted(hidden), fh)
 
 
 def resolve(selector, sessions=None):
@@ -386,7 +434,7 @@ def cmd_render(arg_tokens=None):
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
     children, roots = build_forest(sessions, owner)
-    text, ordered = render(sessions, children, roots, filter_str, within)
+    text, ordered = render(sessions, children, roots, filter_str, within, hidden=load_hidden())
     write_last_tree(ordered, sessions)
     print(text if text else "No sessions found.")
     return 0
@@ -408,12 +456,61 @@ def cmd_resume(args):
     return 0
 
 
+def cmd_hide(selectors):
+    sessions = load_sessions()
+    hidden = load_hidden()
+    added, missing = [], []
+    for sel in selectors:
+        hit = resolve(sel, sessions)
+        if hit and hit[0] not in hidden:
+            hidden.add(hit[0])
+            added.append(hit[0])
+        elif not hit:
+            missing.append(sel)
+    save_hidden(hidden)
+    out = "Hidden %d session(s) from /tree" % len(added)
+    if added:
+        out += ": " + ", ".join(s[:8] for s in added)
+    if missing:
+        out += " | no match: " + ", ".join(missing)
+    print(out)
+    return 0
+
+
+def cmd_unhide(selectors):
+    hidden = load_hidden()
+    if selectors and selectors[0].lower() == "all":
+        count = len(hidden)
+        save_hidden(set())
+        print("Restored all %d hidden session(s)." % count)
+        return 0
+    sessions = load_sessions()
+    removed = []
+    for sel in selectors:
+        hit = resolve(sel, sessions)
+        target = hit[0] if hit else None
+        for h in list(hidden):
+            if h == target or h.startswith(sel):
+                hidden.discard(h)
+                removed.append(h)
+    save_hidden(hidden)
+    out = "Restored %d session(s)" % len(removed)
+    if removed:
+        out += ": " + ", ".join(s[:8] for s in removed)
+    print(out)
+    return 0
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "render"
     if cmd == "render":
         return cmd_render(argv[2:])
     if cmd == "resume":
         return cmd_resume(argv[2:])
+    if cmd == "hide":
+        return cmd_hide(argv[2:])
+    if cmd == "unhide":
+        return cmd_unhide(argv[2:])
     print("unknown command: %s (use 'render' or 'resume')" % cmd)
     return 2
 

@@ -173,5 +173,38 @@ class TestFilter(unittest.TestCase):
             self.assertNotIn(drop, ordered)
 
 
+class TestHidden(unittest.TestCase):
+    def setUp(self):
+        self.sessions = cc_tree.load_sessions()
+        self.children, self.roots = cc_tree.build_forest(
+            self.sessions, cc_tree.build_owner_index(self.sessions))
+
+    def test_hidden_excluded_children_reparented(self):
+        _, ordered = cc_tree.render(self.sessions, self.children, self.roots, hidden={"child"})
+        self.assertNotIn("child", ordered)   # the hidden node is gone
+        self.assertIn("grand", ordered)      # but its child re-parents to root and stays
+        self.assertIn("root", ordered)
+
+    def test_hide_node_promotes_descendants(self):
+        _, ordered = cc_tree.render(self.sessions, self.children, self.roots, hidden={"root"})
+        self.assertNotIn("root", ordered)
+        for s in ("child", "grand", "sib"):
+            self.assertIn(s, ordered)
+
+    def test_hidden_footer_has_restore_hint(self):
+        text, _ = cc_tree.render(self.sessions, self.children, self.roots, hidden={"child"})
+        self.assertIn("hidden (1)", text)
+        self.assertIn("unhide", text)
+
+    def test_load_save_hidden_roundtrip(self):
+        path = cc_tree._hidden_path()
+        try:
+            cc_tree.save_hidden({"aaa", "bbb"})
+            self.assertEqual(cc_tree.load_hidden(), {"aaa", "bbb"})
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
