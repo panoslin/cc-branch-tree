@@ -7,7 +7,7 @@ A Claude Code plugin that visualizes your conversation **fork tree** across all 
 ## What it does
 
 - `/tree [filter]` — render all sessions grouped by project, with true parent→child fork nesting, titles, message counts, and idle time.
-- `/checkout <index | id-prefix | name>` — open a new terminal window running `cd <cwd> && claude --resume <session-id>` for the chosen node.
+- `/checkout <index | id-prefix | name>` — print the copyable resume command (`cd <cwd> && claude --resume <session-id>`) for the chosen node. (A one-click window opener, `scripts/launch.sh`, still ships — call `cc_tree.py resume <sel> --launch` if you prefer auto-open.)
 
 ## How it works (no Claude Code internals are modified)
 
