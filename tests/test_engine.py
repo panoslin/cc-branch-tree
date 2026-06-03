@@ -111,6 +111,16 @@ class TestRenderResolve(unittest.TestCase):
         self.assertEqual(cc_tree.resolve("Branch", self.sessions)[0], "child")
         self.assertIsNone(cc_tree.resolve("zzz-nomatch", self.sessions))
 
+    def test_connectors(self):
+        def line(sid):
+            tag = "[%d]" % self.ordered.index(sid)
+            return next(l for l in self.text.splitlines() if tag in l)
+        # root's children: child (not last) -> ├─ ; sib (last) -> └─
+        self.assertIn("├─", line("child"))
+        self.assertIn("└─", line("sib"))
+        # grand is nested deeper than child
+        self.assertGreater(line("grand").index("["), line("child").index("["))
+
 
 class TestCLI(unittest.TestCase):
     def test_resume_prints_command(self):

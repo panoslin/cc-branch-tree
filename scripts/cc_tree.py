@@ -228,25 +228,32 @@ def render(sessions, children, roots, filter_str=None):
             continue
         lines.append("\U0001F4C1 %s" % proj)
         for sid in sorted(by_proj[proj], key=_sort_key(sessions)):
-            _emit(sid, 0, sessions, children, lines, ordered)
+            _emit(sid, sessions, children, lines, ordered)
         lines.append("")
     text = "\n".join(lines).rstrip()
     return text, ordered
 
 
-def _emit(sid, depth, sessions, children, lines, ordered):
+def _emit(sid, sessions, children, lines, ordered, child_prefix="  ", is_root=True, is_last=True):
     s = sessions[sid]
     idx = len(ordered)
     ordered.append(sid)
-    prefix = "  " + "│  " * (depth - 1) + "└─ " if depth else "  "
+    if is_root:
+        line_prefix = "  "
+        next_prefix = "  "
+    else:
+        line_prefix = child_prefix + ("└─ " if is_last else "├─ ")
+        next_prefix = child_prefix + ("   " if is_last else "│  ")
     extra = (" · %s" % s.git_branch) if s.git_branch else ""
     d = fork_depth(s, sessions)
     if d is not None:
         extra += "  ↳forked after %d msg" % d
     lines.append("%s[%d] %s · %s · %dmsg · %s%s"
-                 % (prefix, idx, s.sid[:8], s.label[:32], s.msgs, _idle(s.last), extra))
-    for c in sorted(children.get(sid, []), key=_sort_key(sessions)):
-        _emit(c, depth + 1, sessions, children, lines, ordered)
+                 % (line_prefix, idx, s.sid[:8], s.label[:32], s.msgs, _idle(s.last), extra))
+    kids = sorted(children.get(sid, []), key=_sort_key(sessions))
+    for i, c in enumerate(kids):
+        _emit(c, sessions, children, lines, ordered, next_prefix,
+              is_root=False, is_last=(i == len(kids) - 1))
 
 
 # --------------------------------------------------------------------------- resolve
