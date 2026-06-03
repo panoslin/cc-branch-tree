@@ -113,11 +113,19 @@ class TestRenderResolve(unittest.TestCase):
         self.assertLess(self.ordered.index("sib"), self.ordered.index("child"))
 
     def test_indent_grand_under_child(self):
-        def indent(sid):
-            tag = "[%d]" % self.ordered.index(sid)
-            line = next(l for l in self.text.splitlines() if tag in l)
-            return line.index(tag)
-        self.assertGreater(indent("grand"), indent("child"))
+        lines = self.text.splitlines()
+        cl = next(l for l in lines if "Child Branch" in l)
+        gl = next(l for l in lines if "grandchild question" in l)
+        # grand's label sits further right (deeper tree prefix) than child's
+        self.assertGreater(gl.index("grandchild question"), cl.index("Child Branch"))
+
+    def test_columns_drop_msg_and_git(self):
+        line = next(l for l in self.text.splitlines() if "solo first message" in l)
+        self.assertNotIn("msg", line)   # message-count column removed
+        self.assertNotIn("dev", line)   # git-branch column removed
+
+    def test_branch_count_shown(self):
+        self.assertIn("⑂", self.text)   # nodes with children show ⑂N
 
     def test_resolve(self):
         ri = self.ordered.index("root")
@@ -134,8 +142,6 @@ class TestRenderResolve(unittest.TestCase):
         kids = sorted(("child", "sib"), key=self.ordered.index)
         self.assertIn("├─", line(kids[0]))
         self.assertIn("└─", line(kids[-1]))
-        # grand is nested deeper than child
-        self.assertGreater(line("grand").index("["), line("child").index("["))
 
 
 class TestCLI(unittest.TestCase):
@@ -201,6 +207,28 @@ class TestHidden(unittest.TestCase):
         try:
             cc_tree.save_hidden({"aaa", "bbb"})
             self.assertEqual(cc_tree.load_hidden(), {"aaa", "bbb"})
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_hide_cascades_to_descendants(self):
+        path = cc_tree._hidden_path()
+        try:
+            cc_tree.save_hidden(set())
+            with contextlib.redirect_stdout(io.StringIO()):
+                cc_tree.cmd_hide(["root"])   # root has child->grand and sib
+            self.assertEqual(cc_tree.load_hidden(), {"root", "child", "grand", "sib"})
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
+    def test_unhide_cascades_to_descendants(self):
+        path = cc_tree._hidden_path()
+        try:
+            cc_tree.save_hidden({"root", "child", "grand", "sib"})
+            with contextlib.redirect_stdout(io.StringIO()):
+                cc_tree.cmd_unhide(["root"])
+            self.assertEqual(cc_tree.load_hidden(), set())
         finally:
             if os.path.exists(path):
                 os.remove(path)

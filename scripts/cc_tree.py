@@ -24,6 +24,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 
 MSG_TYPES = ("user", "assistant")
 
@@ -208,14 +209,6 @@ def build_forest(sessions, owner=None):
     return children, roots
 
 
-def fork_depth(child, sessions):
-    """How many of the parent's own messages this child inherited (its fork point)."""
-    p = child.forked_from_sid
-    if p in sessions:
-        return len(child.inherited_uuids & set(sessions[p].msg_uuids))
-    return None
-
-
 # --------------------------------------------------------------------------- render
 def _idle(ts):
     if not ts:
@@ -274,6 +267,26 @@ def _apply_hidden(sessions, children, roots, hidden):
     return vchildren, vroots
 
 
+def _dw(s):
+    """Monospace display width (CJK / full-width characters count as 2 cells)."""
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in s)
+
+
+def _trunc(s, width):
+    out, used = "", 0
+    for c in s:
+        cw = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+        if used + cw > width:
+            return out + "…"
+        out += c
+        used += cw
+    return out
+
+
+def _padr(s, width):
+    return s + " " * max(0, width - _dw(s))
+
+
 def render(sessions, children, roots, filter_str=None, within_seconds=None, now=None, hidden=None):
     if hidden:
         children, roots = _apply_hidden(sessions, children, roots, hidden)
@@ -289,24 +302,61 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
     def recency(sid):
         return _epoch(sessions[sid].last)
 
+    def proj_recency(group):
+        return max(_subtree_last_epoch(r, sessions, children, memo) for r in group)
+
     by_proj = {}
     for sid in roots:
         if not keep(sid):
             continue
         by_proj.setdefault(sessions[sid].cwd or "(unknown)", []).append(sid)
 
-    def proj_recency(proj):
-        return max(_subtree_last_epoch(r, sessions, children, memo) for r in by_proj[proj])
-
-    lines = []
     ordered = []
-    for proj in sorted(by_proj, key=proj_recency, reverse=True):
+    rows = []
+
+    def collect(sid, prefix, is_root, is_last, proj):
+        s = sessions[sid]
+        ordered.append(sid)
+        if is_root:
+            tree, child_pref = "", ""
+        else:
+            tree = prefix + ("└─ " if is_last else "├─ ")
+            child_pref = prefix + ("   " if is_last else "│  ")
+        kids = [c for c in children.get(sid, ()) if keep(c)]
+        kids.sort(key=recency, reverse=True)
+        rows.append({"idx": len(ordered) - 1, "sid": s.sid[:8], "prefix": tree,
+                     "label": s.label or "(untitled)", "time": _idle(s.last),
+                     "branches": len(kids), "proj": proj})
+        for i, c in enumerate(kids):
+            collect(c, child_pref, False, i == len(kids) - 1, proj)
+
+    for proj in sorted(by_proj, key=lambda p: proj_recency(by_proj[p]), reverse=True):
         if filter_str and filter_str.lower() not in proj.lower():
             continue
-        lines.append("\U0001F4C1 %s" % proj)
         for sid in sorted(by_proj[proj], key=recency, reverse=True):
-            _emit(sid, sessions, children, lines, ordered, keep)
-        lines.append("")
+            collect(sid, "", True, True, proj)
+
+    lines = []
+    if rows:
+        idx_w = max(len("[%d]" % r["idx"]) for r in rows)
+        for r in rows:
+            r["name"] = r["prefix"] + _trunc(r["label"], 34)
+        name_w = max(_dw(r["name"]) for r in rows)
+        time_w = max(len(r["time"]) for r in rows)
+        cur = None
+        for r in rows:
+            if r["proj"] != cur:
+                if lines:
+                    lines.append("")
+                lines.append("\U0001F4C1 %s" % r["proj"])
+                cur = r["proj"]
+            idx_s = ("[%d]" % r["idx"]).rjust(idx_w)
+            line = "  %s  %s  %s  %s" % (idx_s, r["sid"], _padr(r["name"], name_w),
+                                         r["time"].rjust(time_w))
+            if r["branches"]:
+                line += "  ⑂%d" % r["branches"]
+            lines.append(line.rstrip())
+
     text = "\n".join(lines).rstrip()
     if hidden:
         shown = sorted(h for h in hidden if h in sessions)
@@ -316,30 +366,6 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
             text += ("\n\n· hidden (%d): %s%s  —  /cc-branch-tree:unhide <id|all> to restore"
                      % (len(shown), preview, more))
     return text, ordered
-
-
-def _emit(sid, sessions, children, lines, ordered, keep,
-          child_prefix="  ", is_root=True, is_last=True):
-    s = sessions[sid]
-    idx = len(ordered)
-    ordered.append(sid)
-    if is_root:
-        line_prefix = "  "
-        next_prefix = "  "
-    else:
-        line_prefix = child_prefix + ("└─ " if is_last else "├─ ")
-        next_prefix = child_prefix + ("   " if is_last else "│  ")
-    extra = (" · %s" % s.git_branch) if s.git_branch else ""
-    d = fork_depth(s, sessions)
-    if d is not None:
-        extra += "  ↳forked after %d msg" % d
-    lines.append("%s[%d] %s · %s · %dmsg · %s%s"
-                 % (line_prefix, idx, s.sid[:8], s.label[:32], s.msgs, _idle(s.last), extra))
-    kids = [c for c in children.get(sid, ()) if keep(c)]
-    kids.sort(key=lambda c: _epoch(sessions[c].last), reverse=True)
-    for i, c in enumerate(kids):
-        _emit(c, sessions, children, lines, ordered, keep, next_prefix,
-              is_root=False, is_last=(i == len(kids) - 1))
 
 
 # --------------------------------------------------------------------------- resolve
@@ -456,17 +482,29 @@ def cmd_resume(args):
     return 0
 
 
+def _descendants(sid, children, acc):
+    for c in children.get(sid, ()):
+        if c not in acc:
+            acc.add(c)
+            _descendants(c, children, acc)
+    return acc
+
+
 def cmd_hide(selectors):
     sessions = load_sessions()
+    owner = build_owner_index(sessions) if _needs_owner(sessions) else None
+    children, _ = build_forest(sessions, owner)
     hidden = load_hidden()
     added, missing = [], []
     for sel in selectors:
         hit = resolve(sel, sessions)
-        if hit and hit[0] not in hidden:
-            hidden.add(hit[0])
-            added.append(hit[0])
-        elif not hit:
+        if not hit:
             missing.append(sel)
+            continue
+        for t in {hit[0]} | _descendants(hit[0], children, set()):  # node + its branches
+            if t not in hidden:
+                hidden.add(t)
+                added.append(t)
     save_hidden(hidden)
     out = "Hidden %d session(s) from /tree" % len(added)
     if added:
@@ -485,12 +523,14 @@ def cmd_unhide(selectors):
         print("Restored all %d hidden session(s)." % count)
         return 0
     sessions = load_sessions()
+    owner = build_owner_index(sessions) if _needs_owner(sessions) else None
+    children, _ = build_forest(sessions, owner)
     removed = []
     for sel in selectors:
         hit = resolve(sel, sessions)
-        target = hit[0] if hit else None
+        targets = ({hit[0]} | _descendants(hit[0], children, set())) if hit else set()
         for h in list(hidden):
-            if h == target or h.startswith(sel):
+            if h in targets or h.startswith(sel):
                 hidden.discard(h)
                 removed.append(h)
     save_hidden(hidden)
