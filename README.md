@@ -1,17 +1,23 @@
 # cc-branch-tree
 
-A Claude Code plugin that visualizes your conversation **fork tree** across all projects and lets you resume any branch in a new terminal window — like `git branch` + `checkout` for Claude Code sessions.
+A Claude Code plugin that visualizes your conversation **fork tree** across all projects and lets you jump to any branch — like `git branch` + `checkout` for Claude Code sessions. No Claude Code internals are modified; it reads the session transcripts and shells out to the standard CLI.
 
-> **Status**: in development (MVP). See [docs/specs/2026-06-01-cc-branch-tree-design.md](docs/specs/2026-06-01-cc-branch-tree-design.md).
+> **Status**: v0.2.0. See [docs/specs](docs/specs/) and [CHANGELOG.md](CHANGELOG.md).
 
-## What it does
+## Commands
 
-- `/tree [filter]` — render all sessions grouped by project, with true parent→child fork nesting, titles, message counts, and idle time.
-- `/checkout <index | id-prefix | name>` — print the copyable resume command (`cd <cwd> && claude --resume <session-id>`) for the chosen node. (A one-click window opener, `scripts/launch.sh`, still ships — call `cc_tree.py resume <sel> --launch` if you prefer auto-open.)
+| Command | What it does |
+|---|---|
+| `/tree [10d\|3h\|2w\|30m] [all] [project]` | Render all sessions grouped by project, **most-recent first**, with true parent→child fork nesting. Optional time window (e.g. `10d` = active within 10 days), `all` to also show command-runner sessions, and/or a project-name filter. |
+| `/checkout <index \| id-prefix \| name>` | Copy an **in-session `/resume <id>`** to the clipboard (paste into the prompt to switch to that branch in place; works across projects by id). Also prints a `cd … && claude --resume` command for opening it in a new terminal. |
+| `/hide <index \| id-prefix \| name> …` | Soft-hide one or more conversations (and their sub-branches) from `/tree`. Reversible — the transcript is never deleted. Then re-renders the tree. |
+| `/unhide <id \| name \| all> …` | Restore hidden conversations (cascades to sub-branches). Then re-renders the tree. |
 
-## How it works (no Claude Code internals are modified)
+Each `/tree` row: `[index]  session-id  time  ⏎tree-prefix full-name  ⑂N-branches`. Columns are aligned; the full name is shown untruncated. Command-runner sessions (whose first message is a slash command) are auto-hidden by default — use `/tree all` to show them.
 
-Claude Code stores each session as JSONL at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. A `/branch` (`/fork`) copies the parent's history into a new session file and stamps inherited entries with `forkedFrom.sessionId` = the **immediate parent**. The engine reads these files, rebuilds the fork forest, and shells out to the standard `claude --resume` CLI.
+## How it works
+
+Claude Code stores each session as JSONL at `~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`. A `/branch` (`/fork`) copies the parent's history into a new session file and stamps inherited entries with `forkedFrom.sessionId` = the **immediate parent**. The engine reads these files, rebuilds the fork forest, recovers real project paths from each entry's `cwd` (the folder name is lossy), and resolves a node to a resume target. Hidden sessions and the last view (time window/filter) are persisted as small sidecars under `${CLAUDE_PLUGIN_DATA}`.
 
 ## Install (development)
 
@@ -19,19 +25,21 @@ Claude Code stores each session as JSONL at `~/.claude/projects/<encoded-cwd>/<s
 claude --plugin-dir /Volumes/PanosT9/Projects/cc-branch-tree
 ```
 
+Reload the plugin (restart with `--plugin-dir`) after pulling changes to command files.
+
 ## Layout
 
 ```
-.claude-plugin/plugin.json   plugin manifest
-commands/                    /tree, /checkout (markdown skills)
-scripts/cc_tree.py           parser + tree builder + resolver (Python 3 stdlib)
-scripts/launch.sh            terminal launcher (tmux / iTerm / Terminal)
-tests/                       pytest with synthetic fixtures
-docs/specs/                  design spec
+.claude-plugin/plugin.json   manifest
+commands/                    /tree, /checkout, /hide, /unhide (markdown skills, pinned to haiku + low effort)
+scripts/cc_tree.py           parser, fork-tree builder, renderer, resolver (Python 3 stdlib, zero deps)
+scripts/launch.sh            new-terminal launcher (tmux / iTerm / Terminal)
+tests/                       unittest suite + synthetic fixtures
+docs/specs, docs/plans       design spec & implementation plan
 ```
 
 ## Requirements
 
-- macOS (launcher); Linux/WSL planned
-- Python 3.8+
+- Python 3.8+ (standard library only)
+- macOS for clipboard (`pbcopy`) and new-terminal launch; Linux clipboard via `wl-copy`/`xclip`
 - Claude Code v2.1.x
