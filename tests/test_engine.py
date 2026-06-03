@@ -238,6 +238,20 @@ class TestHidden(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    def test_hide_renders_updated_tree(self):
+        path = cc_tree._hidden_path()
+        try:
+            cc_tree.save_hidden(set())
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                cc_tree.cmd_hide(["sib"])
+            out = buf.getvalue()
+            self.assertIn("Hidden", out)         # confirmation line
+            self.assertIn("\U0001F4C1", out)     # the updated tree is printed after it
+        finally:
+            if os.path.exists(path):
+                os.remove(path)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

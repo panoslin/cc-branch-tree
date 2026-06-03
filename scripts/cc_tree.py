@@ -432,14 +432,18 @@ def parse_filter_args(tokens):
     return (" ".join(project).strip() or None, within)
 
 
+def _print_tree(sessions, children, roots, hidden=None, filter_str=None, within=None):
+    text, ordered = render(sessions, children, roots, filter_str, within, hidden=hidden)
+    write_last_tree(ordered, sessions)
+    print(text if text else "No sessions found.")
+
+
 def cmd_render(arg_tokens=None):
     filter_str, within = parse_filter_args(arg_tokens or [])
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
     children, roots = build_forest(sessions, owner)
-    text, ordered = render(sessions, children, roots, filter_str, within, hidden=load_hidden())
-    write_last_tree(ordered, sessions)
-    print(text if text else "No sessions found.")
+    _print_tree(sessions, children, roots, load_hidden(), filter_str, within)
     return 0
 
 
@@ -470,7 +474,7 @@ def _descendants(sid, children, acc):
 def cmd_hide(selectors):
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
-    children, _ = build_forest(sessions, owner)
+    children, roots = build_forest(sessions, owner)
     hidden = load_hidden()
     added, missing = [], []
     for sel in selectors:
@@ -489,32 +493,35 @@ def cmd_hide(selectors):
     if missing:
         out += " | no match: " + ", ".join(missing)
     print(out)
+    print()
+    _print_tree(sessions, children, roots, hidden)   # show the updated tree
     return 0
 
 
 def cmd_unhide(selectors):
-    hidden = load_hidden()
-    if selectors and selectors[0].lower() == "all":
-        count = len(hidden)
-        save_hidden(set())
-        print("Restored all %d hidden session(s)." % count)
-        return 0
     sessions = load_sessions()
     owner = build_owner_index(sessions) if _needs_owner(sessions) else None
-    children, _ = build_forest(sessions, owner)
+    children, roots = build_forest(sessions, owner)
+    hidden = load_hidden()
     removed = []
-    for sel in selectors:
-        hit = resolve(sel, sessions)
-        targets = ({hit[0]} | _descendants(hit[0], children, set())) if hit else set()
-        for h in list(hidden):
-            if h in targets or h.startswith(sel):
-                hidden.discard(h)
-                removed.append(h)
+    if selectors and selectors[0].lower() == "all":
+        removed = sorted(hidden)
+        hidden = set()
+    else:
+        for sel in selectors:
+            hit = resolve(sel, sessions)
+            targets = ({hit[0]} | _descendants(hit[0], children, set())) if hit else set()
+            for h in list(hidden):
+                if h in targets or h.startswith(sel):
+                    hidden.discard(h)
+                    removed.append(h)
     save_hidden(hidden)
     out = "Restored %d session(s)" % len(removed)
     if removed:
         out += ": " + ", ".join(s[:8] for s in removed)
     print(out)
+    print()
+    _print_tree(sessions, children, roots, hidden)   # show the updated tree
     return 0
 
 
