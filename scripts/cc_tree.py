@@ -407,6 +407,94 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
     return text, ordered
 
 
+# --------------------------------------------------------------------------- inspect
+def _transcript_path(sid):
+    m = glob.glob(os.path.join(projects_dir(), "*", sid + ".jsonl"))
+    return m[0] if m else None
+
+
+def _parse_messages(path):
+    """Parse one session's user/assistant messages (non-sidechain) for the rewind tree."""
+    msgs = {}
+    order = []
+    for line in open(path, encoding="utf-8", errors="replace"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if o.get("type") in MSG_TYPES and not o.get("isSidechain") and o.get("uuid"):
+            u = o["uuid"]
+            msgs[u] = {"parent": o.get("parentUuid"), "role": o["type"],
+                       "preview": _msg_preview(o.get("message")) or "", "order": len(order)}
+            order.append(u)
+    return msgs, order
+
+
+def _subtree_size(u, children):
+    n = 1
+    for c in children.get(u, ()):
+        n += _subtree_size(c, children)
+    return n
+
+
+def inspect_branches(msgs, order, min_abandoned=2):
+    """Find in-session /rewind branch points (a message with >=2 children).
+
+    Returns (substantial, trivial_count). A substantial branch point has at least one
+    abandoned (non-current-path) branch of >= min_abandoned messages; trivial
+    single-message edits are counted but not returned.
+    """
+    children = {}
+    for u, m in msgs.items():
+        children.setdefault(m["parent"], []).append(u)
+    for kids in children.values():
+        kids.sort(key=lambda u: msgs[u]["order"])
+    tip = order[-1] if order else None
+    spine = set()
+    cur = tip
+    while cur in msgs:
+        spine.add(cur)
+        cur = msgs[cur]["parent"]
+    parents = sorted((p for p in children if p in msgs and len(children[p]) >= 2),
+                     key=lambda p: msgs[p]["order"])
+    substantial = []
+    trivial = 0
+    for p in parents:
+        branches = [{"head": msgs[k]["preview"], "size": _subtree_size(k, children),
+                     "current": k in spine} for k in children[p]]
+        if any((not b["current"]) and b["size"] >= min_abandoned for b in branches):
+            substantial.append({"at": msgs[p]["preview"], "branches": branches})
+        else:
+            trivial += 1
+    return substantial, trivial
+
+
+def render_inspect(sid, label, total, substantial, trivial):
+    lines = ["\U0001F50D %s · %s  (%d msgs, %d rewind-branch point%s)"
+             % (sid[:8], label, total, len(substantial), "" if len(substantial) == 1 else "s")]
+    if not substantial:
+        tail = "  single linear thread — no substantial /rewind branches"
+        if trivial:
+            tail += " (%d trivial edit-branch%s)" % (trivial, "" if trivial == 1 else "es")
+        lines.append(tail)
+        return "\n".join(lines)
+    for bp in substantial:
+        lines.append("  ◇ branched at: %s" % (bp["at"] or "(no preview)"))
+        kids = bp["branches"]
+        for i, b in enumerate(kids):
+            conn = "└─" if i == len(kids) - 1 else "├─"
+            tag = "● current  " if b["current"] else "○ abandoned"
+            tip = " →tip" if b["current"] else ""
+            lines.append("    %s %s: %s  (%d msg)%s"
+                         % (conn, tag, b["head"] or "(no preview)", b["size"], tip))
+    if trivial:
+        lines.append("  · %d trivial edit-branch%s not shown" % (trivial, "" if trivial == 1 else "es"))
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- resolve
 def _last_tree_path():
     return os.path.join(data_dir(), "last_tree.json")
@@ -633,6 +721,25 @@ def cmd_unhide(selectors):
     return 0
 
 
+def cmd_inspect(args):
+    selector = " ".join(args).strip()
+    sessions = load_sessions()
+    hit = resolve(selector, sessions)
+    if not hit:
+        print("No matching node for: %r" % selector)
+        return 1
+    sid, _ = hit
+    path = _transcript_path(sid)
+    if not path:
+        print("Transcript not found for %s" % sid[:8])
+        return 1
+    label = sessions[sid].label if sid in sessions else sid[:8]
+    msgs, order = _parse_messages(path)
+    substantial, trivial = inspect_branches(msgs, order)
+    print(render_inspect(sid, label, len(order), substantial, trivial))
+    return 0
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "render"
     if cmd == "render":
@@ -643,6 +750,8 @@ def main(argv):
         return cmd_hide(argv[2:])
     if cmd == "unhide":
         return cmd_unhide(argv[2:])
+    if cmd == "inspect":
+        return cmd_inspect(argv[2:])
     print("unknown command: %s (use 'render' or 'resume')" % cmd)
     return 2
 
