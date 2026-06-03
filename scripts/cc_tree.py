@@ -164,14 +164,59 @@ def parse_transcript(path):
     return s
 
 
+# Light fields sufficient to build & render the tree (uuid sets are only needed for
+# the F6 owner cross-check, which the production path never triggers). Cached as JSON.
+_CACHE_FIELDS = ("cwd", "git_branch", "forked_from_sid", "label", "created", "last", "msgs")
+
+
+def _cache_path():
+    return os.path.join(data_dir(), "parse_cache.json")
+
+
+def _session_from_cache(sid, rec):
+    s = Session(sid)
+    for k in _CACHE_FIELDS:
+        setattr(s, k, rec.get(k))
+    return s
+
+
 def load_sessions():
-    sessions = {}
-    for path in glob.glob(os.path.join(projects_dir(), "*", "*.jsonl")):
+    """Parse every transcript into a Session, skipping files unchanged since last run
+    via an (mtime, size) cache. Set CC_NO_CACHE=1 to always parse fresh (tests do)."""
+    use_cache = not os.environ.get("CC_NO_CACHE")
+    cache = {}
+    if use_cache:
         try:
-            s = parse_transcript(path)
+            with open(_cache_path(), encoding="utf-8") as fh:
+                cache = json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            cache = {}
+    sessions = {}
+    fresh = {}
+    for path in glob.glob(os.path.join(projects_dir(), "*", "*.jsonl")):
+        sid = os.path.basename(path)[:-6]
+        try:
+            st = os.stat(path)
         except OSError:
             continue
+        key = "%r:%d" % (st.st_mtime, st.st_size)
+        entry = cache.get(path)
+        if use_cache and entry and entry.get("key") == key:
+            s = _session_from_cache(sid, entry["rec"])
+        else:
+            try:
+                s = parse_transcript(path)
+            except OSError:
+                continue
+            entry = {"key": key, "rec": {k: getattr(s, k) for k in _CACHE_FIELDS}}
         sessions[s.sid] = s
+        fresh[path] = entry
+    if use_cache:
+        try:
+            with open(_cache_path(), "w", encoding="utf-8") as fh:
+                json.dump(fresh, fh)
+        except OSError:
+            pass
     return sessions
 
 

@@ -14,6 +14,7 @@ FIX = os.path.join(HERE, "fixtures", "projects")
 os.environ["CC_PROJECTS_DIR"] = FIX
 os.environ["CLAUDE_PLUGIN_DATA"] = tempfile.mkdtemp(prefix="ccbt-test-")
 os.environ["CC_NO_CLIPBOARD"] = "1"  # never touch the real clipboard during tests
+os.environ["CC_NO_CACHE"] = "1"      # always parse fresh in tests (uuid sets present)
 
 import cc_tree  # noqa: E402
 
@@ -202,6 +203,25 @@ class TestFilter(unittest.TestCase):
         finally:
             if os.path.exists(path):
                 os.remove(path)
+
+    def test_cache_roundtrip(self):
+        cache = cc_tree._cache_path()
+        old = os.environ.pop("CC_NO_CACHE", None)
+        try:
+            if os.path.exists(cache):
+                os.remove(cache)
+            first = cc_tree.load_sessions()    # parses fresh + writes cache
+            self.assertTrue(os.path.exists(cache))
+            second = cc_tree.load_sessions()   # served from cache
+            self.assertEqual(set(first), set(second))
+            self.assertEqual(second["root"].label, "Root Session")
+            self.assertEqual(second["child"].forked_from_sid, "root")
+            self.assertEqual(second["solo"].cwd, "/work/proj2")
+        finally:
+            if old is not None:
+                os.environ["CC_NO_CACHE"] = old
+            if os.path.exists(cache):
+                os.remove(cache)
 
 
 class TestHidden(unittest.TestCase):
