@@ -22,6 +22,7 @@ import glob
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 
@@ -488,6 +489,20 @@ def cmd_render(arg_tokens=None):
     return 0
 
 
+def _copy_to_clipboard(text):
+    """Best-effort copy to the system clipboard. Returns True on success."""
+    if os.environ.get("CC_NO_CLIPBOARD"):
+        return False
+    for tool in (["pbcopy"], ["wl-copy"], ["xclip", "-selection", "clipboard"]):
+        try:
+            subprocess.run(tool, input=text.encode("utf-8"), check=True,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True
+        except (OSError, subprocess.CalledProcessError):
+            continue
+    return False
+
+
 def cmd_resume(args):
     launch = "--launch" in args
     selector = next((a for a in args if a != "--launch"), "")
@@ -500,7 +515,10 @@ def cmd_resume(args):
     if launch:
         launcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "launch.sh")
         os.execv("/bin/bash", ["/bin/bash", launcher, cwd, sid])
-    print('cd "%s" && claude --resume %s' % (cwd, sid))
+    cmd = 'cd "%s" && claude --resume %s' % (cwd, sid)
+    if _copy_to_clipboard(cmd):
+        print("✓ Copied to clipboard — paste to run:")
+    print(cmd)
     return 0
 
 

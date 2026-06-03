@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 FIX = os.path.join(HERE, "fixtures", "projects")
 os.environ["CC_PROJECTS_DIR"] = FIX
 os.environ["CLAUDE_PLUGIN_DATA"] = tempfile.mkdtemp(prefix="ccbt-test-")
+os.environ["CC_NO_CLIPBOARD"] = "1"  # never touch the real clipboard during tests
 
 import cc_tree  # noqa: E402
 
@@ -158,6 +159,9 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("claude --resume root", out)
         self.assertIn('cd "/work/proj1"', out)
+
+    def test_clipboard_guarded_in_tests(self):
+        self.assertFalse(cc_tree._copy_to_clipboard("x"))   # CC_NO_CLIPBOARD is set
 
 
 class TestFilter(unittest.TestCase):
