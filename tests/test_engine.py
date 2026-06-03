@@ -299,27 +299,28 @@ class TestHidden(unittest.TestCase):
 class TestInspect(unittest.TestCase):
     def test_branch_point_detected(self):
         msgs, order = cc_tree._parse_messages(fpath("proj1", "rewind"))
-        substantial, trivial = cc_tree.inspect_branches(msgs, order)
-        self.assertEqual(len(substantial), 1)
-        bp = substantial[0]
+        shown, trivial, hidden = cc_tree.inspect_branches(msgs, order)
+        self.assertEqual(len(shown), 1)
+        bp = shown[0]
         cur = [b for b in bp["branches"] if b["current"]]
-        aban = [b for b in bp["branches"] if not b["current"]]
+        other = [b for b in bp["branches"] if not b["current"]]
         self.assertEqual([b["head"] for b in cur], ["actually, path B"])
-        self.assertEqual([b["head"] for b in aban], ["follow path A"])
-        self.assertEqual(aban[0]["size"], 2)
+        self.assertEqual([b["head"] for b in other], ["follow path A"])
+        self.assertEqual(other[0]["size"], 2)
 
     def test_linear_session_has_no_branches(self):
         msgs, order = cc_tree._parse_messages(fpath("proj1", "root"))
-        substantial, trivial = cc_tree.inspect_branches(msgs, order)
-        self.assertEqual(substantial, [])
+        shown, trivial, hidden = cc_tree.inspect_branches(msgs, order)
+        self.assertEqual(shown, [])
 
-    def test_render_inspect_shows_current_and_abandoned(self):
+    def test_render_inspect_shows_current_and_other(self):
         msgs, order = cc_tree._parse_messages(fpath("proj1", "rewind"))
-        substantial, trivial = cc_tree.inspect_branches(msgs, order)
-        text = cc_tree.render_inspect("rewind", "label", len(order), substantial, trivial)
+        shown, trivial, hidden = cc_tree.inspect_branches(msgs, order)
+        text = cc_tree.render_inspect("rewind", "label", len(order), shown, trivial, hidden)
         self.assertIn("current", text)
-        self.assertIn("abandoned", text)
+        self.assertIn("other", text)
         self.assertIn("actually, path B", text)
+        self.assertIn("follow path A", text)
 
 
 if __name__ == "__main__":

@@ -440,12 +440,38 @@ def _subtree_size(u, children):
     return n
 
 
-def inspect_branches(msgs, order, min_abandoned=2):
+def _first_text_down(u, msgs, children):
+    """First non-empty message preview at or below u (breadth-first)."""
+    queue = [u]
+    seen = set()
+    while queue:
+        x = queue.pop(0)
+        if x in seen or x not in msgs:
+            continue
+        seen.add(x)
+        if msgs[x]["preview"]:
+            return msgs[x]["preview"]
+        queue.extend(children.get(x, ()))
+    return ""
+
+
+def _first_text_up(u, msgs):
+    """First non-empty message preview at or above u (walking parents)."""
+    x = u
+    while x in msgs:
+        if msgs[x]["preview"]:
+            return msgs[x]["preview"]
+        x = msgs[x]["parent"]
+    return ""
+
+
+def inspect_branches(msgs, order, min_abandoned=2, limit=12):
     """Find in-session /rewind branch points (a message with >=2 children).
 
-    Returns (substantial, trivial_count). A substantial branch point has at least one
-    abandoned (non-current-path) branch of >= min_abandoned messages; trivial
-    single-message edits are counted but not returned.
+    Returns (shown, trivial, hidden): `shown` lists the most substantial branch points
+    (at least one non-live branch of >= min_abandoned messages), capped at `limit` and
+    ordered chronologically; `trivial` counts single-message edits; `hidden` counts
+    substantial points beyond the cap. Previews skip tool-only messages.
     """
     children = {}
     for u, m in msgs.items():
@@ -458,40 +484,49 @@ def inspect_branches(msgs, order, min_abandoned=2):
     while cur in msgs:
         spine.add(cur)
         cur = msgs[cur]["parent"]
-    parents = sorted((p for p in children if p in msgs and len(children[p]) >= 2),
-                     key=lambda p: msgs[p]["order"])
-    substantial = []
+    items = []
     trivial = 0
-    for p in parents:
-        branches = [{"head": msgs[k]["preview"], "size": _subtree_size(k, children),
+    for p in (q for q in children if q in msgs and len(children[q]) >= 2):
+        branches = [{"head": _first_text_down(k, msgs, children),
+                     "size": _subtree_size(k, children),
                      "current": k in spine} for k in children[p]]
         if any((not b["current"]) and b["size"] >= min_abandoned for b in branches):
-            substantial.append({"at": msgs[p]["preview"], "branches": branches})
+            items.append({"at": _first_text_up(p, msgs), "branches": branches,
+                          "_max": max(b["size"] for b in branches), "_order": msgs[p]["order"]})
         else:
             trivial += 1
-    return substantial, trivial
+    items.sort(key=lambda it: it["_max"], reverse=True)
+    shown = sorted(items[:limit], key=lambda it: it["_order"])
+    return shown, trivial, len(items) - len(shown)
 
 
-def render_inspect(sid, label, total, substantial, trivial):
+def render_inspect(sid, label, total, shown, trivial, hidden):
+    nbp = len(shown) + hidden
     lines = ["\U0001F50D %s · %s  (%d msgs, %d rewind-branch point%s)"
-             % (sid[:8], label, total, len(substantial), "" if len(substantial) == 1 else "s")]
-    if not substantial:
+             % (sid[:8], label, total, nbp, "" if nbp == 1 else "s")]
+    if not shown:
         tail = "  single linear thread — no substantial /rewind branches"
         if trivial:
             tail += " (%d trivial edit-branch%s)" % (trivial, "" if trivial == 1 else "es")
         lines.append(tail)
         return "\n".join(lines)
-    for bp in substantial:
-        lines.append("  ◇ branched at: %s" % (bp["at"] or "(no preview)"))
+    ph = "(tool/no-text message)"
+    for bp in shown:
+        lines.append("  ◇ branched at: %s" % (bp["at"] or ph))
         kids = bp["branches"]
         for i, b in enumerate(kids):
             conn = "└─" if i == len(kids) - 1 else "├─"
-            tag = "● current  " if b["current"] else "○ abandoned"
+            tag = "● current" if b["current"] else "○ other  "
             tip = " →tip" if b["current"] else ""
             lines.append("    %s %s: %s  (%d msg)%s"
-                         % (conn, tag, b["head"] or "(no preview)", b["size"], tip))
+                         % (conn, tag, b["head"] or ph, b["size"], tip))
+    notes = []
+    if hidden:
+        notes.append("%d smaller branch point%s not shown" % (hidden, "" if hidden == 1 else "s"))
     if trivial:
-        lines.append("  · %d trivial edit-branch%s not shown" % (trivial, "" if trivial == 1 else "es"))
+        notes.append("%d trivial edit-branch%s" % (trivial, "" if trivial == 1 else "es"))
+    if notes:
+        lines.append("  · " + " · ".join(notes))
     return "\n".join(lines)
 
 
@@ -735,8 +770,8 @@ def cmd_inspect(args):
         return 1
     label = sessions[sid].label if sid in sessions else sid[:8]
     msgs, order = _parse_messages(path)
-    substantial, trivial = inspect_branches(msgs, order)
-    print(render_inspect(sid, label, len(order), substantial, trivial))
+    shown, trivial, hidden = inspect_branches(msgs, order)
+    print(render_inspect(sid, label, len(order), shown, trivial, hidden))
     return 0
 
 
