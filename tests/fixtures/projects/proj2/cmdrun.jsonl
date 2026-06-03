@@ -1,0 +1,1 @@
+{"type":"user","uuid":"cr1","parentUuid":null,"sessionId":"cmdrun","cwd":"/work/proj2","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"<command-message>deploy</command-message>\n<command-name>/deploy</command-name>\nDeploy the service to production now, verbatim instructions follow"}}

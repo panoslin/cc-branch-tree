@@ -90,6 +90,11 @@ def _msg_preview(message, n=46):
                 break
     if not raw:
         return None
+    # A session whose first message is a slash-command invocation: label it by the
+    # command name (e.g. "/deploy"), not the rendered command body.
+    cmd = re.search(r"<command-name>\s*(\S[^<]*?)\s*</command-name>", raw)
+    if cmd:
+        return cmd.group(1).strip()[:n]
     raw = _WRAPPER_RE.sub(" ", raw)
     for line in raw.splitlines():
         line = line.strip()

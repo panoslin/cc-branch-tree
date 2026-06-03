@@ -51,6 +51,11 @@ class TestParse(unittest.TestCase):
         s = cc_tree.parse_transcript(fpath("-work-projx", "cwdpick"))
         self.assertEqual(s.cwd, "/work/projx")
 
+    def test_command_invocation_label(self):
+        # First message is a /command invocation -> label by command name, not body.
+        s = cc_tree.parse_transcript(fpath("proj2", "cmdrun"))
+        self.assertEqual(s.label, "/deploy")
+
 
 class TestForest(unittest.TestCase):
     def setUp(self):
