@@ -46,6 +46,11 @@ class TestParse(unittest.TestCase):
         s = cc_tree.parse_transcript(fpath("proj2", "caveat"))
         self.assertEqual(s.label, "Real user question about X")
 
+    def test_cwd_picks_project_root_not_subdir(self):
+        # First cwd is a subdir; the cwd matching the folder encoding must win.
+        s = cc_tree.parse_transcript(fpath("-work-projx", "cwdpick"))
+        self.assertEqual(s.cwd, "/work/projx")
+
 
 class TestForest(unittest.TestCase):
     def setUp(self):

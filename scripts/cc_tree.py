@@ -99,9 +99,16 @@ def _msg_preview(message, n=46):
 
 
 # --------------------------------------------------------------------------- parse
+def _encode_cwd(path):
+    """Replicate Claude Code's cwd -> project-folder encoding."""
+    return re.sub(r"[^A-Za-z0-9]", "-", path)
+
+
 def parse_transcript(path):
     s = Session(os.path.basename(path)[:-6])
+    folder = os.path.basename(os.path.dirname(path))
     custom_title = ai_title = first_user = None
+    first_cwd = first_git = matched_cwd = matched_git = None
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             line = line.strip()
@@ -122,9 +129,12 @@ def parse_transcript(path):
                 if u:
                     s.inherited_uuids.add(u)
                     s.inherited_in_order.append(u)
-            if s.cwd is None and o.get("cwd"):
-                s.cwd = o["cwd"]
-                s.git_branch = o.get("gitBranch")
+            if o.get("cwd"):
+                cw = o["cwd"]
+                if first_cwd is None:
+                    first_cwd, first_git = cw, o.get("gitBranch")
+                if matched_cwd is None and _encode_cwd(cw) == folder:
+                    matched_cwd, matched_git = cw, o.get("gitBranch")
             if t == "custom-title":
                 custom_title = _title_text(o) or custom_title
             elif t == "ai-title":
@@ -140,6 +150,10 @@ def parse_transcript(path):
                     s.last = ts
                 if t == "user" and first_user is None:
                     first_user = _msg_preview(o.get("message"))
+    # Prefer the cwd whose encoding matches the session's project folder (the true
+    # resume target); fall back to the first cwd seen (e.g. mid-session `cd`s only).
+    s.cwd = matched_cwd or first_cwd
+    s.git_branch = matched_git if matched_cwd else first_git
     s.label = custom_title or ai_title or first_user or "(untitled)"
     return s
 
