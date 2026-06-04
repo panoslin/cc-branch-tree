@@ -1,0 +1,4 @@
+{"type":"user","uuid":"t1","parentUuid":null,"sessionId":"retry","cwd":"/work/proj1","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"ask something"}}
+{"type":"assistant","uuid":"t2","parentUuid":"t1","sessionId":"retry","timestamp":"2026-06-01T00:00:05.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"partial answer (interrupted)"}]}}
+{"type":"assistant","uuid":"t3","parentUuid":"t1","sessionId":"retry","timestamp":"2026-06-01T00:00:10.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"full answer"}]}}
+{"type":"user","uuid":"t4","parentUuid":"t3","sessionId":"retry","timestamp":"2026-06-01T00:00:20.000Z","isSidechain":false,"message":{"role":"user","content":"thanks, follow up"}}

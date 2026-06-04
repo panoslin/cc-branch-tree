@@ -12,7 +12,8 @@ A Claude Code plugin that visualizes your conversation **fork tree** across all 
 | `/checkout <index \| id-prefix \| name>` | Copy an **in-session `/resume <id>`** to the clipboard (paste into the prompt to switch to that branch in place; works across projects by id). Also prints a `cd … && claude --resume` command for opening it in a new terminal. |
 | `/hide <index \| id-prefix \| name> …` | Soft-hide one or more conversations (and their sub-branches) from `/tree`. Reversible — the transcript is never deleted. Then re-renders the tree. |
 | `/unhide <id \| name \| all> …` | Restore hidden conversations (cascades to sub-branches). Then re-renders the tree. |
-| `/inspect <index \| id-prefix \| name>` | Drill into one session's internal `/rewind` branches — the message-level `parentUuid` divergences — marking the live path vs other paths and hiding trivial single-message edits. |
+| `/inspect <index \| id-prefix \| name>` | Drill into one session's internal `/rewind` branches: each meaningful divergence shows `● continued` vs `○ abandoned` with a `[ref]`; auto-retry/error fragments and tiny edits are filtered out (and counted). |
+| `/extract <ref>` | Take an abandoned branch back: dumps the `[ref]` branch from the last `/inspect` as markdown (full text, tool noise skipped), printed and copied to the clipboard — paste it into your current conversation to reuse its findings. |
 
 Each `/tree` row: `[index]  session-id  time  ⏎tree-prefix full-name  ⑂N-branches`. Columns are aligned; the full name is shown untruncated. Command-runner sessions (whose first message is a slash command) are auto-hidden by default — use `/tree all` to show them.
 
