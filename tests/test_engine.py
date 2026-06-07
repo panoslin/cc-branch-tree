@@ -114,6 +114,11 @@ class TestRenderResolve(unittest.TestCase):
         # sib (last 00:03) is more recent than child (last 00:02) -> sib ranks first
         self.assertLess(self.ordered.index("sib"), self.ordered.index("child"))
 
+    def test_fork_label_uses_own_first_message(self):
+        # a fork's label is the first message TYPED in it, not the inherited one
+        self.assertEqual(self.sessions["sib"].label, "sibling question")
+        self.assertEqual(self.sessions["grand"].label, "grandchild question")
+
     def test_indent_grand_under_child(self):
         lines = self.text.splitlines()
         cl = next(l for l in lines if "Child Branch" in l)
@@ -294,58 +299,6 @@ class TestHidden(unittest.TestCase):
             for p in (hp, vp):
                 if os.path.exists(p):
                     os.remove(p)
-
-
-class TestInspect(unittest.TestCase):
-    def test_branch_point_detected(self):
-        msgs, order = cc_tree._parse_messages(fpath("proj1", "rewind"))
-        shown, trivial, retries, hidden = cc_tree.inspect_branches(msgs, order)
-        self.assertEqual(len(shown), 1)
-        bp = shown[0]
-        cur = [b for b in bp["branches"] if b["current"]]
-        other = [b for b in bp["branches"] if not b["current"]]
-        self.assertEqual([b["head"] for b in cur], ["actually, path B"])
-        self.assertEqual([b["head"] for b in other], ["follow path A"])
-        self.assertEqual(other[0]["size"], 2)
-        self.assertTrue(cur[0]["tip"])           # continued path leads to the live tip
-
-    def test_linear_session_has_no_branches(self):
-        msgs, order = cc_tree._parse_messages(fpath("proj1", "root"))
-        shown, trivial, retries, hidden = cc_tree.inspect_branches(msgs, order)
-        self.assertEqual(shown, [])
-
-    def test_retry_artifacts_filtered(self):
-        # an abandoned sibling with no human input is a retry scar, not a branch
-        msgs, order = cc_tree._parse_messages(fpath("proj1", "retry"))
-        shown, trivial, retries, hidden = cc_tree.inspect_branches(msgs, order)
-        self.assertEqual(shown, [])
-        self.assertEqual(retries, 1)
-
-    def test_render_inspect_marks_continued_and_abandoned(self):
-        msgs, order = cc_tree._parse_messages(fpath("proj1", "rewind"))
-        shown, trivial, retries, hidden = cc_tree.inspect_branches(msgs, order)
-        text = cc_tree.render_inspect("rewind", "label", len(order), shown, trivial, retries, hidden)
-        self.assertIn("continued", text)
-        self.assertIn("abandoned", text)
-        self.assertIn("[1a]", text)
-        self.assertIn("actually, path B", text)
-        self.assertIn("follow path A", text)
-
-    def test_extract_branch(self):
-        li = cc_tree._last_inspect_path()
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                cc_tree.cmd_inspect(["rewind"])          # writes last_inspect.json refs
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = cc_tree.cmd_extract(["1a"])         # 1a = the abandoned path A
-            out = buf.getvalue()
-            self.assertEqual(rc, 0)
-            self.assertIn("follow path A", out)
-            self.assertIn("A continued", out)
-        finally:
-            if os.path.exists(li):
-                os.remove(li)
 
 
 if __name__ == "__main__":

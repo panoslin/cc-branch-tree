@@ -2,11 +2,11 @@
 
 ## Unreleased (v1.1 work)
 
-- **`/inspect <selector>`**: drill into one session's internal `/rewind` branches (message-level `parentUuid` tree). The continued path is detected by most-recent subtree activity (robust to compaction); abandoned branches must contain human input — pure retry/error fragments and tiny edits are filtered and counted separately. Previews prefer the user's own words; branches get `[ref]` labels.
-- **`/extract <ref>`**: closes the loop — exports an abandoned branch (from the last `/inspect`) as markdown with full message text, printed and copied to the clipboard for reuse in the current conversation.
+- **Fork labels use the fork's own first message**: a forked session without a title is now labeled by the first message *typed in it* (entries without a `forkedFrom` stamp), not the inherited first message — forks of the same parent no longer all show identical labels. Cache schema versioned (`_v`) so stale cached labels are discarded.
 - **Incremental parse cache**: `load_sessions()` skips transcripts unchanged since last run via an `(mtime, size)` cache (`parse_cache.json`); warm renders ~16× faster. `CC_NO_CACHE=1` disables.
 - **Persistent install**: documented skills-dir symlink (`~/.claude/skills/cc-branch-tree` → repo) so the plugin loads every session without `--plugin-dir`.
-- 35 `unittest` cases.
+- `/inspect` + `/extract` (in-session `/rewind` drill-down and branch export) were built and then **removed** as not pulling their weight; the engine is back to tree/checkout/hide/unhide only.
+- 33 `unittest` cases.
 
 ## v0.2.0 — 2026-06-03
 

@@ -113,7 +113,7 @@ def _encode_cwd(path):
 def parse_transcript(path):
     s = Session(os.path.basename(path)[:-6])
     folder = os.path.basename(os.path.dirname(path))
-    custom_title = ai_title = first_user = None
+    custom_title = ai_title = first_user = first_own = None
     first_cwd = first_git = matched_cwd = matched_git = None
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
@@ -154,19 +154,25 @@ def parse_transcript(path):
                     if s.created is None:
                         s.created = ts
                     s.last = ts
-                if t == "user" and first_user is None:
-                    first_user = _msg_preview(o.get("message"))
+                if t == "user":
+                    if first_user is None:
+                        first_user = _msg_preview(o.get("message"))
+                    # First message TYPED in this session (no forkedFrom stamp) — for a
+                    # fork this is what distinguishes it from its parent, so it wins.
+                    if first_own is None and not isinstance(ff, dict):
+                        first_own = _msg_preview(o.get("message"))
     # Prefer the cwd whose encoding matches the session's project folder (the true
     # resume target); fall back to the first cwd seen (e.g. mid-session `cd`s only).
     s.cwd = matched_cwd or first_cwd
     s.git_branch = matched_git if matched_cwd else first_git
-    s.label = custom_title or ai_title or first_user or "(untitled)"
+    s.label = custom_title or ai_title or first_own or first_user or "(untitled)"
     return s
 
 
 # Light fields sufficient to build & render the tree (uuid sets are only needed for
 # the F6 owner cross-check, which the production path never triggers). Cached as JSON.
 _CACHE_FIELDS = ("cwd", "git_branch", "forked_from_sid", "label", "created", "last", "msgs")
+_CACHE_V = 2   # bump when parse/label semantics change, so stale cached labels are discarded
 
 
 def _cache_path():
@@ -191,6 +197,8 @@ def load_sessions():
                 cache = json.load(fh)
         except (OSError, json.JSONDecodeError):
             cache = {}
+        if cache.get("_v") != _CACHE_V:
+            cache = {}
     sessions = {}
     fresh = {}
     for path in glob.glob(os.path.join(projects_dir(), "*", "*.jsonl")):
@@ -212,6 +220,7 @@ def load_sessions():
         sessions[s.sid] = s
         fresh[path] = entry
     if use_cache:
+        fresh["_v"] = _CACHE_V
         try:
             with open(_cache_path(), "w", encoding="utf-8") as fh:
                 json.dump(fresh, fh)
@@ -407,214 +416,6 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
     return text, ordered
 
 
-# --------------------------------------------------------------------------- inspect
-def _transcript_path(sid):
-    m = glob.glob(os.path.join(projects_dir(), "*", sid + ".jsonl"))
-    return m[0] if m else None
-
-
-def _msg_full_text(message):
-    """Full text of a message (text blocks only; tool blocks skipped), wrappers stripped."""
-    if not isinstance(message, dict):
-        return ""
-    c = message.get("content")
-    if isinstance(c, str):
-        return _WRAPPER_RE.sub(" ", c).strip()
-    if isinstance(c, list):
-        parts = [b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
-        return _WRAPPER_RE.sub(" ", "\n".join(p for p in parts if p)).strip()
-    return ""
-
-
-def _parse_messages(path, with_text=False):
-    """Parse one session's user/assistant messages (non-sidechain) for the rewind tree."""
-    msgs = {}
-    order = []
-    for line in open(path, encoding="utf-8", errors="replace"):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            o = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if o.get("type") in MSG_TYPES and not o.get("isSidechain") and o.get("uuid"):
-            u = o["uuid"]
-            msgs[u] = {"parent": o.get("parentUuid"), "role": o["type"],
-                       "preview": _msg_preview(o.get("message")) or "", "order": len(order)}
-            if with_text:
-                msgs[u]["text"] = _msg_full_text(o.get("message"))
-            order.append(u)
-    return msgs, order
-
-
-def _subtree_size(u, children):
-    n = 1
-    for c in children.get(u, ()):
-        n += _subtree_size(c, children)
-    return n
-
-
-def _first_text_down(u, msgs, children):
-    """First non-empty message preview at or below u (breadth-first)."""
-    queue = [u]
-    seen = set()
-    while queue:
-        x = queue.pop(0)
-        if x in seen or x not in msgs:
-            continue
-        seen.add(x)
-        if msgs[x]["preview"]:
-            return msgs[x]["preview"]
-        queue.extend(children.get(x, ()))
-    return ""
-
-
-def _first_user_text_down(u, msgs, children):
-    """First HUMAN-typed preview at or below u — what the user asked on this path."""
-    queue = [u]
-    seen = set()
-    while queue:
-        x = queue.pop(0)
-        if x in seen or x not in msgs:
-            continue
-        seen.add(x)
-        if msgs[x]["role"] == "user" and msgs[x]["preview"]:
-            return msgs[x]["preview"]
-        queue.extend(children.get(x, ()))
-    return ""
-
-
-def _first_text_up(u, msgs):
-    """First non-empty message preview at or above u (walking parents)."""
-    x = u
-    while x in msgs:
-        if msgs[x]["preview"]:
-            return msgs[x]["preview"]
-        x = msgs[x]["parent"]
-    return ""
-
-
-def _first_user_text_up(u, msgs):
-    x = u
-    while x in msgs:
-        if msgs[x]["role"] == "user" and msgs[x]["preview"]:
-            return msgs[x]["preview"]
-        x = msgs[x]["parent"]
-    return ""
-
-
-def _subtree_latest(u, msgs, children, memo):
-    """Largest message order in u's subtree (= how recently this path was active)."""
-    if u in memo:
-        return memo[u]
-    best = msgs[u]["order"]
-    for c in children.get(u, ()):
-        v = _subtree_latest(c, msgs, children, memo)
-        if v > best:
-            best = v
-    memo[u] = best
-    return best
-
-
-def _subtree_has_user_text(u, msgs, children, memo):
-    """Whether u's subtree contains a human-typed message (vs pure retry/tool noise)."""
-    if u in memo:
-        return memo[u]
-    m = msgs[u]
-    ok = m["role"] == "user" and bool(m["preview"])
-    if not ok:
-        ok = any(_subtree_has_user_text(c, msgs, children, memo) for c in children.get(u, ()))
-    memo[u] = ok
-    return ok
-
-
-def inspect_branches(msgs, order, min_abandoned=2, limit=12):
-    """Find meaningful in-session rewind points (a message with >=2 children).
-
-    The child whose subtree was active most recently is the path that CONTINUED
-    (robust even when compaction breaks the literal parent chain); the rest were
-    abandoned. A point is shown only if an abandoned branch has >= min_abandoned
-    messages INCLUDING human input. Abandoned fragments with no human input are
-    counted as retry/error artifacts; human-typed-but-tiny ones as trivial edits.
-
-    Returns (shown, trivial, retries, hidden).
-    """
-    children = {}
-    for u, m in msgs.items():
-        children.setdefault(m["parent"], []).append(u)
-    for kids in children.values():
-        kids.sort(key=lambda u: msgs[u]["order"])
-    last_order = len(order) - 1
-    lat = {}
-    ut = {}
-    items = []
-    trivial = 0
-    retries = 0
-    for p in (q for q in children if q in msgs and len(children[q]) >= 2):
-        kids = children[p]
-        cont = max(kids, key=lambda k: _subtree_latest(k, msgs, children, lat))
-        branches = [{"uuid": k,
-                     "head": _first_user_text_down(k, msgs, children) or _first_text_down(k, msgs, children),
-                     "size": _subtree_size(k, children),
-                     "current": k == cont,
-                     "tip": _subtree_latest(k, msgs, children, lat) == last_order}
-                    for k in kids]
-        abandoned = [b for b in branches if not b["current"]]
-        meaningful = [b for b in abandoned
-                      if b["size"] >= min_abandoned
-                      and _subtree_has_user_text(b["uuid"], msgs, children, ut)]
-        if meaningful:
-            items.append({"at": _first_user_text_up(p, msgs) or _first_text_up(p, msgs),
-                          "branches": branches,
-                          "_max": max(b["size"] for b in abandoned),
-                          "_order": msgs[p]["order"]})
-        elif any(_subtree_has_user_text(b["uuid"], msgs, children, ut) for b in abandoned):
-            trivial += 1
-        else:
-            retries += 1
-    items.sort(key=lambda it: it["_max"], reverse=True)
-    shown = sorted(items[:limit], key=lambda it: it["_order"])
-    return shown, trivial, retries, len(items) - len(shown)
-
-
-def render_inspect(sid, label, total, shown, trivial, retries, hidden):
-    lines = ["\U0001F50D %s · %s  (%d msgs)" % (sid[:8], label, total)]
-    skipped = []
-    if hidden:
-        skipped.append("%d smaller" % hidden)
-    if trivial:
-        skipped.append("%d tiny edit%s" % (trivial, "" if trivial == 1 else "s"))
-    if retries:
-        skipped.append("%d retry/error artifact%s" % (retries, "" if retries == 1 else "s"))
-    if not shown:
-        lines.append("  no meaningful /rewind branches — single linear thread"
-                     + ((" · hidden: " + ", ".join(skipped)) if skipped else ""))
-        return "\n".join(lines)
-    nbp = len(shown) + hidden
-    lines.append("  %d meaningful rewind point%s  ·  ● path that continued  ·  ○ abandoned exploration"
-                 % (nbp, "" if nbp == 1 else "s"))
-    ph = "(tool/no-text)"
-    first_ref = "1a"
-    for i, bp in enumerate(shown, 1):
-        lines.append("  ◇ %d) at: %s" % (i, bp["at"] or ph))
-        kids = bp["branches"]
-        for j, b in enumerate(kids):
-            conn = "└─" if j == len(kids) - 1 else "├─"
-            ref = "%d%s" % (i, chr(ord("a") + j))
-            if not b["current"] and first_ref == "1a" and i == 1:
-                first_ref = ref
-            tag = "● continued" if b["current"] else "○ abandoned"
-            tipmark = " →tip" if b["tip"] else ""
-            lines.append("    %s [%s] %s: %s  (%d msg)%s"
-                         % (conn, ref, tag, b["head"] or ph, b["size"], tipmark))
-    lines.append("  · take an abandoned branch back: /cc-branch-tree:extract <ref>   (e.g. extract %s)"
-                 % first_ref)
-    if skipped:
-        lines.append("  · hidden: " + ", ".join(skipped))
-    return "\n".join(lines)
-
-
 # --------------------------------------------------------------------------- resolve
 def _last_tree_path():
     return os.path.join(data_dir(), "last_tree.json")
@@ -671,23 +472,6 @@ def load_view():
         return v.get("filter"), v.get("within"), bool(v.get("show_all"))
     except (OSError, json.JSONDecodeError):
         return None, None, False
-
-
-def _last_inspect_path():
-    return os.path.join(data_dir(), "last_inspect.json")
-
-
-def save_last_inspect(sid, refs):
-    with open(_last_inspect_path(), "w", encoding="utf-8") as fh:
-        json.dump({"sid": sid, "refs": refs}, fh)
-
-
-def load_last_inspect():
-    try:
-        with open(_last_inspect_path(), encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return None
 
 
 def resolve(selector, sessions=None):
@@ -858,76 +642,6 @@ def cmd_unhide(selectors):
     return 0
 
 
-def cmd_inspect(args):
-    selector = " ".join(args).strip()
-    sessions = load_sessions()
-    hit = resolve(selector, sessions)
-    if not hit:
-        print("No matching node for: %r" % selector)
-        return 1
-    sid, _ = hit
-    path = _transcript_path(sid)
-    if not path:
-        print("Transcript not found for %s" % sid[:8])
-        return 1
-    label = sessions[sid].label if sid in sessions else sid[:8]
-    msgs, order = _parse_messages(path)
-    shown, trivial, retries, hidden = inspect_branches(msgs, order)
-    refs = {}
-    for i, bp in enumerate(shown, 1):
-        for j, b in enumerate(bp["branches"]):
-            refs["%d%s" % (i, chr(ord("a") + j))] = b["uuid"]
-    save_last_inspect(sid, refs)
-    print(render_inspect(sid, label, len(order), shown, trivial, retries, hidden))
-    return 0
-
-
-def cmd_extract(args):
-    ref = (args[0] if args else "").strip().lower()
-    data = load_last_inspect()
-    if not data or ref not in (data.get("refs") or {}):
-        print("Unknown branch ref %r — run /cc-branch-tree:inspect <session> first, "
-              "then use one of its [refs]." % ref)
-        return 1
-    sid = data["sid"]
-    head = data["refs"][ref]
-    path = _transcript_path(sid)
-    if not path:
-        print("Transcript not found for %s" % sid[:8])
-        return 1
-    msgs, order = _parse_messages(path, with_text=True)
-    children = {}
-    for u, m in msgs.items():
-        children.setdefault(m["parent"], []).append(u)
-    sub = []
-    stack = [head]
-    seen = set()
-    while stack:
-        x = stack.pop()
-        if x in seen or x not in msgs:
-            continue
-        seen.add(x)
-        sub.append(x)
-        stack.extend(children.get(x, ()))
-    sub.sort(key=lambda u: msgs[u]["order"])
-    parts = []
-    for u in sub:
-        text = msgs[u].get("text") or ""
-        if not text:
-            continue
-        if len(text) > 1500:
-            text = text[:1500] + " …(truncated)"
-        parts.append("**%s:** %s" % ("User" if msgs[u]["role"] == "user" else "Claude", text))
-    md = ("## Extracted branch %s from session %s\n\n%s"
-          % (ref, sid[:8], "\n\n".join(parts) if parts else "(no text content on this branch)"))
-    if _copy_to_clipboard(md):
-        print("✓ Branch %s copied to clipboard (%d message%s with text). Content:"
-              % (ref, len(parts), "" if len(parts) == 1 else "s"))
-        print()
-    print(md)
-    return 0
-
-
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "render"
     if cmd == "render":
@@ -938,10 +652,6 @@ def main(argv):
         return cmd_hide(argv[2:])
     if cmd == "unhide":
         return cmd_unhide(argv[2:])
-    if cmd == "inspect":
-        return cmd_inspect(argv[2:])
-    if cmd == "extract":
-        return cmd_extract(argv[2:])
     print("unknown command: %s (use 'render' or 'resume')" % cmd)
     return 2
 
