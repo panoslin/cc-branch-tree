@@ -24,10 +24,11 @@ Claude Code stores each session as JSONL at `~/.claude/projects/<encoded-cwd>/<s
 **Persistent (recommended)** — symlink into the user skills dir so it auto-loads every session as `cc-branch-tree@skills-dir` (no `--plugin-dir`, edits stay live):
 
 ```bash
-ln -s /Volumes/PanosT9/Projects/cc-branch-tree ~/.claude/skills/cc-branch-tree
+git clone https://github.com/panoslin/cc-branch-tree.git
+ln -s "$(pwd)/cc-branch-tree" ~/.claude/skills/cc-branch-tree
 ```
 
-**Per-session (dev):** `claude --plugin-dir /Volumes/PanosT9/Projects/cc-branch-tree`
+**Per-session (dev):** `claude --plugin-dir /path/to/cc-branch-tree`
 
 Either way, restart the session to pick up changes to command (`.md`) files; `scripts/cc_tree.py` changes take effect on the next command call. Parsed sessions are cached by `(mtime, size)` in `parse_cache.json`, so repeat renders only re-read changed transcripts.
 
