@@ -1,6 +1,6 @@
 ---
 description: Restore conversations previously hidden from /tree (use "all" to restore everything)
-argument-hint: "<id-prefix | name | all> [more…]"
+argument-hint: "<index | a-b range | id-prefix | \"title substring\" | all> [more…]"
 disable-model-invocation: true
 allowed-tools: Bash(python3 *)
 model: haiku

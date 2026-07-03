@@ -301,5 +301,105 @@ class TestHidden(unittest.TestCase):
                     os.remove(p)
 
 
+
+class TestResolveMany(unittest.TestCase):
+    def setUp(self):
+        self.sessions = cc_tree.load_sessions()
+        children, roots = cc_tree.build_forest(
+            self.sessions, cc_tree.build_owner_index(self.sessions)
+        )
+        _, self.ordered = cc_tree.render(self.sessions, children, roots)
+        cc_tree.write_last_tree(self.ordered, self.sessions)
+
+    def test_index_range(self):
+        sids = [sid for sid, _ in cc_tree.resolve_many("2-4")]
+        self.assertEqual(sids, self.ordered[2:5])
+
+    def test_range_reversed_and_clamped(self):
+        # 99-8 == 8-99, clamped to what the last tree actually has
+        sids = [sid for sid, _ in cc_tree.resolve_many("99-8")]
+        self.assertEqual(sids, self.ordered[8:])
+
+    def test_label_substring_matches_all(self):
+        sids = {sid for sid, _ in cc_tree.resolve_many("sibling", self.sessions)}
+        self.assertEqual(sids, {"sib"})
+        sids = {sid for sid, _ in cc_tree.resolve_many("question", self.sessions)}
+        self.assertEqual(sids, {"sib", "grand", "caveat"})   # all label matches, not just first
+
+    def test_sid_prefix_still_works(self):
+        self.assertEqual([s for s, _ in cc_tree.resolve_many("gra", self.sessions)], ["grand"])
+
+    def test_hide_accepts_range_and_title(self):
+        hp, vp = cc_tree._hidden_path(), cc_tree._view_path()
+        try:
+            cc_tree.save_hidden(set())
+            if os.path.exists(vp):
+                os.remove(vp)
+            with contextlib.redirect_stdout(io.StringIO()):
+                cc_tree.cmd_hide(["2-3", "New Name"])
+            hidden = cc_tree.load_hidden()
+            expect = set(self.ordered[2:4]) | {"renamed"}
+            # plus cascaded descendants of anything in the range
+            self.assertTrue(expect <= hidden)
+        finally:
+            for q in (hp, vp):
+                if os.path.exists(q):
+                    os.remove(q)
+
+
+class TestSearch(unittest.TestCase):
+    def setUp(self):
+        self.sessions = cc_tree.load_sessions()
+
+    def test_content_hit_only_where_typed(self):
+        # "hello" was TYPED in root; child/sib/grand only inherited it via fork
+        rows = cc_tree.search_sessions(self.sessions, ["hello"])
+        self.assertEqual([r["sid"] for r in rows], ["root"])
+
+    def test_case_insensitive_with_snippet_highlight(self):
+        rows = cc_tree.search_sessions(self.sessions, ["HELLO"])
+        self.assertEqual(rows[0]["sid"], "root")
+        self.assertIn("«hello»", rows[0]["snippet"])
+
+    def test_and_semantics(self):
+        rows = cc_tree.search_sessions(self.sessions, ["sibling", "question"])
+        self.assertEqual([r["sid"] for r in rows], ["sib"])
+        self.assertEqual(cc_tree.search_sessions(self.sessions, ["hello", "question"]), [])
+
+    def test_ranked_by_hits_then_recency(self):
+        rows = cc_tree.search_sessions(self.sessions, ["question"])
+        # grand/sib/caveat: 2 hits (label+message); child: 1. Ties break by recency.
+        self.assertEqual([r["sid"] for r in rows], ["grand", "sib", "caveat", "child"])
+
+    def test_time_window_filter(self):
+        rows = cc_tree.search_sessions(self.sessions, ["hello"], within=60)
+        self.assertEqual(rows, [])   # fixtures are days old
+
+    def test_command_sessions_skipped_unless_show_all(self):
+        # /tree-style runner sessions echo other sessions' titles -> noise by default
+        rows = cc_tree.search_sessions(self.sessions, ["deploy"])
+        self.assertEqual(rows, [])
+        rows = cc_tree.search_sessions(self.sessions, ["deploy"], show_all=True)
+        self.assertEqual([r["sid"] for r in rows], ["cmdrun"])
+
+    def test_cmd_search_indices_feed_resolve(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cc_tree.cmd_search(["question"])
+        out = buf.getvalue()
+        self.assertEqual(rc, 0)
+        self.assertIn("[0]", out)
+        self.assertIn("«question»", out)
+        # search results renumber the [n] index space used by checkout/hide
+        self.assertEqual(cc_tree.resolve("0")[0], "grand")
+
+    def test_cmd_search_requires_keywords(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cc_tree.cmd_search(["10d"])
+        self.assertEqual(rc, 1)
+        self.assertIn("usage", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

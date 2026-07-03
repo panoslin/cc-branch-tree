@@ -416,6 +416,124 @@ def render(sessions, children, roots, filter_str=None, within_seconds=None, now=
     return text, ordered
 
 
+# --------------------------------------------------------------------------- search
+SEARCH_LIMIT = 15
+
+
+def _msg_text(message):
+    """Full text of a message (text blocks only; tool blocks skipped), wrappers stripped."""
+    if not isinstance(message, dict):
+        return ""
+    c = message.get("content")
+    if isinstance(c, str):
+        return _WRAPPER_RE.sub(" ", c).strip()
+    if isinstance(c, list):
+        parts = [b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text"]
+        return _WRAPPER_RE.sub(" ", "\n".join(p for p in parts if p)).strip()
+    return ""
+
+
+def _snippet(text, kws, radius=30):
+    """A short window around the earliest keyword occurrence, all keywords «marked»."""
+    low = text.lower()
+    positions = [low.find(k) for k in kws if k in low]
+    if not positions:
+        return ""
+    pos = min(positions)
+    start, end = max(0, pos - radius), min(len(text), pos + 2 * radius)
+    snip = " ".join(text[start:end].split())
+    for k in sorted(kws, key=len, reverse=True):   # longest first: don't split «grandchild»
+        snip = re.sub("(%s)" % re.escape(k), "«\\1»", snip, flags=re.IGNORECASE)
+    return ("…" if start else "") + snip + ("…" if end < len(text) else "")
+
+
+def search_transcript(path, kws):
+    """Per-keyword hit counts + first matching snippet over messages TYPED in this
+    session. Fork-inherited copies (forkedFrom-stamped) are skipped so parent content
+    doesn't re-match in every fork; sidechains are skipped too."""
+    counts = [0] * len(kws)
+    snippet = ""
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            low = line.lower()
+            if not any(k in low for k in kws):   # cheap raw pre-filter before json parse
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (o.get("type") not in MSG_TYPES or o.get("isSidechain")
+                    or isinstance(o.get("forkedFrom"), dict)):
+                continue
+            text = _msg_text(o.get("message"))
+            if not text:
+                continue
+            tl = text.lower()
+            hit = False
+            for i, k in enumerate(kws):
+                c = tl.count(k)
+                counts[i] += c
+                hit = hit or c > 0
+            if hit and not snippet:
+                snippet = _snippet(text, kws)
+    return counts, snippet
+
+
+def search_sessions(sessions, keywords, within=None, now=None, show_all=False):
+    """AND-match all keywords (case-insensitive) against each session's label + own
+    message text. Command-runner sessions (e.g. /tree runs, whose output echoes other
+    sessions' titles) are skipped unless show_all. Rows sorted by total hits desc,
+    then recency desc."""
+    kws = [k.lower() for k in keywords if k.strip()]
+    if not kws:
+        return []
+    now = time.time() if now is None else now
+    paths = {os.path.basename(p)[:-6]: p
+             for p in glob.glob(os.path.join(projects_dir(), "*", "*.jsonl"))}
+    rows = []
+    for sid, s in sessions.items():
+        if within is not None and now - _epoch(s.last) > within:
+            continue
+        if not show_all and _is_command_session(s):
+            continue
+        label_low = (s.label or "").lower()
+        counts = [label_low.count(k) for k in kws]
+        snippet = ""
+        if sid in paths:
+            tcounts, snippet = search_transcript(paths[sid], kws)
+            counts = [a + b for a, b in zip(counts, tcounts)]
+        if all(counts):
+            rows.append({"sid": sid, "hits": sum(counts), "snippet": snippet,
+                         "last": _epoch(s.last)})
+    rows.sort(key=lambda r: (-r["hits"], -r["last"]))
+    return rows
+
+
+def render_search(rows, sessions, keywords, hidden=None):
+    hidden = hidden or set()
+    head = "\U0001F50E %s — %d match%s" % (" ".join(keywords), len(rows),
+                                                "" if len(rows) == 1 else "es")
+    if not rows:
+        return head + "\n  (no session matches ALL keywords — try fewer)"
+    shown = rows[:SEARCH_LIMIT]
+    iw = len(str(len(shown) - 1))
+    tw = max(len(_idle(sessions[r["sid"]].last)) for r in shown)
+    lines = [head]
+    for i, r in enumerate(shown):
+        s = sessions[r["sid"]]
+        mark = "  (hidden)" if r["sid"] in hidden else ""
+        lines.append("  [%s]  %s  %s  %s%s  — %d hit%s"
+                     % (str(i).rjust(iw), r["sid"][:8], _idle(s.last).rjust(tw),
+                        s.label, mark, r["hits"], "" if r["hits"] == 1 else "s"))
+        if r["snippet"]:
+            lines.append(" " * (iw + 6) + r["snippet"])
+    if len(rows) > len(shown):
+        lines.append("  … %d more — add keywords or a time window (e.g. 10d) to narrow"
+                     % (len(rows) - len(shown)))
+    lines.append("  · these [n] work with /cc-branch-tree:checkout and :hide")
+    return "\n".join(lines)
+
+
 # --------------------------------------------------------------------------- resolve
 def _last_tree_path():
     return os.path.join(data_dir(), "last_tree.json")
@@ -474,26 +592,38 @@ def load_view():
         return None, None, False
 
 
-def resolve(selector, sessions=None):
-    """Resolve an index / sid-prefix / label-substring to (sid, cwd), or None."""
+_RANGE_RE = re.compile(r"^(\d+)-(\d+)$")
+
+
+def resolve_many(selector, sessions=None):
+    """All (sid, cwd) matching an index, an 'a-b' index range, a sid-prefix, or a
+    label substring (every label match, not just the first). Indexes refer to the
+    last /tree or /search output."""
     selector = (selector or "").strip()
     if not selector:
-        return None
-    if selector.isdigit():
+        return []
+    m = _RANGE_RE.match(selector)
+    if m or selector.isdigit():
         nodes = load_last_tree()
-        i = int(selector)
-        if 0 <= i < len(nodes):
-            return nodes[i]["sid"], nodes[i]["cwd"]
+        if m:
+            a, b = sorted((int(m.group(1)), int(m.group(2))))
+        else:
+            a = b = int(selector)
+        return [(n["sid"], n["cwd"]) for i, n in enumerate(nodes) if a <= i <= b]
     if sessions is None:
         sessions = load_sessions()
-    for sid, s in sessions.items():
-        if sid.startswith(selector):
-            return sid, s.cwd
+    prefix = [(sid, s.cwd) for sid, s in sessions.items() if sid.startswith(selector)]
+    if prefix:
+        return prefix
     low = selector.lower()
-    for sid, s in sessions.items():
-        if s.label and low in s.label.lower():
-            return sid, s.cwd
-    return None
+    return [(sid, s.cwd) for sid, s in sessions.items()
+            if s.label and low in s.label.lower()]
+
+
+def resolve(selector, sessions=None):
+    """Resolve an index / sid-prefix / label-substring to a single (sid, cwd), or None."""
+    hits = resolve_many(selector, sessions)
+    return hits[0] if hits else None
 
 
 # --------------------------------------------------------------------------- CLI
@@ -593,14 +723,15 @@ def cmd_hide(selectors):
     hidden = load_hidden()
     added, missing = [], []
     for sel in selectors:
-        hit = resolve(sel, sessions)
-        if not hit:
+        hits = resolve_many(sel, sessions)
+        if not hits:
             missing.append(sel)
             continue
-        for t in {hit[0]} | _descendants(hit[0], children, set()):  # node + its branches
-            if t not in hidden:
-                hidden.add(t)
-                added.append(t)
+        for sid_, _cwd in hits:
+            for t in {sid_} | _descendants(sid_, children, set()):  # node + its branches
+                if t not in hidden:
+                    hidden.add(t)
+                    added.append(t)
     save_hidden(hidden)
     out = "Hidden %d session(s) from /tree" % len(added)
     if added:
@@ -625,8 +756,9 @@ def cmd_unhide(selectors):
         hidden = set()
     else:
         for sel in selectors:
-            hit = resolve(sel, sessions)
-            targets = ({hit[0]} | _descendants(hit[0], children, set())) if hit else set()
+            targets = set()
+            for sid_, _cwd in resolve_many(sel, sessions):
+                targets |= {sid_} | _descendants(sid_, children, set())
             for h in list(hidden):
                 if h in targets or h.startswith(sel):
                     hidden.discard(h)
@@ -642,10 +774,36 @@ def cmd_unhide(selectors):
     return 0
 
 
+def cmd_search(args):
+    keywords, within, show_all = [], None, False
+    for tok in args:
+        t = tok.strip()
+        m = _DURATION_RE.match(t)
+        if m:
+            within = int(m.group(1)) * _DURATION_MULT[m.group(2)]
+        elif t.lower() == "all":
+            show_all = True
+        else:
+            keywords.append(t)
+    keywords = [k for k in keywords if k]
+    if not keywords:
+        print("usage: search <keyword> [more…] [10d|3h|2w] [all]  — all keywords must "
+              "match (case-insensitive); searches titles + full conversation text; "
+              "'all' includes command-runner sessions")
+        return 1
+    sessions = load_sessions()
+    rows = search_sessions(sessions, keywords, within, show_all=show_all)
+    print(render_search(rows, sessions, keywords, load_hidden()))
+    write_last_tree([r["sid"] for r in rows[:SEARCH_LIMIT]], sessions)
+    return 0
+
+
 def main(argv):
     cmd = argv[1] if len(argv) > 1 else "render"
     if cmd == "render":
         return cmd_render(argv[2:])
+    if cmd == "search":
+        return cmd_search(argv[2:])
     if cmd == "resume":
         return cmd_resume(argv[2:])
     if cmd == "hide":

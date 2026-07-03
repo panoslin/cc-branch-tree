@@ -1,6 +1,6 @@
 ---
 description: Soft-hide one or more conversations from /tree (reversible; the transcript is NOT deleted)
-argument-hint: "<index | id-prefix | name> [more…]"
+argument-hint: "<index | a-b range | id-prefix | \"title substring\"> [more…]"
 disable-model-invocation: true
 allowed-tools: Bash(python3 *)
 model: haiku
