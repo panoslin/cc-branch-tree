@@ -514,15 +514,19 @@ def search_sessions(sessions, keywords, within=None, now=None, show_all=False):
     return rows
 
 
-def render_search(rows, sessions, keywords, hidden=None):
+def render_search(rows, sessions, keywords, hidden=None, n_hidden_excluded=0):
     hidden = hidden or set()
     head = "\U0001F50E %s — %d match%s" % (" ".join(keywords), len(rows),
                                                 "" if len(rows) == 1 else "es")
     ncmd = sum(1 for r in rows if r.get("is_cmd"))
     if ncmd:
         head += "  (%d command run%s, shown because of 'all')" % (ncmd, "" if ncmd == 1 else "s")
+    hidden_note = ("  · %d hidden match%s not shown — add 'hidden' to include"
+                   % (n_hidden_excluded, "" if n_hidden_excluded == 1 else "es"))
     if not rows:
-        return head + "\n  (no session matches ALL keywords — try fewer)", []
+        tail = ("\n" + hidden_note) if n_hidden_excluded else \
+            "\n  (no session matches ALL keywords — try fewer)"
+        return head + tail, []
     shown = rows[:SEARCH_LIMIT]
     iw = len(str(len(shown) - 1))
     tw = max(len(_idle(sessions[r["sid"]].last)) for r in shown)
@@ -552,6 +556,8 @@ def render_search(rows, sessions, keywords, hidden=None):
     if len(rows) > len(shown):
         lines.append("  … %d more — add keywords or a time window (e.g. 10d) to narrow"
                      % (len(rows) - len(shown)))
+    if n_hidden_excluded:
+        lines.append(hidden_note)
     lines.append("  · these [n] work with /cc-branch-tree:checkout and :hide")
     return "\n".join(lines), ordered
 
@@ -797,7 +803,7 @@ def cmd_unhide(selectors):
 
 
 def cmd_search(args):
-    keywords, within, show_all = [], None, False
+    keywords, within, show_all, show_hidden = [], None, False, False
     for tok in args:
         t = tok.strip()
         m = _DURATION_RE.match(t)
@@ -805,17 +811,24 @@ def cmd_search(args):
             within = int(m.group(1)) * _DURATION_MULT[m.group(2)]
         elif t.lower() == "all":
             show_all = True
+        elif t.lower() == "hidden":
+            show_hidden = True
         else:
             keywords.append(t)
     keywords = [k for k in keywords if k]
     if not keywords:
-        print("usage: search <keyword> [more…] [10d|3h|2w] [all]  — all keywords must "
-              "match (case-insensitive); searches titles + full conversation text; "
-              "'all' includes command-runner sessions")
+        print("usage: search <keyword> [more…] [10d|3h|2w] [all] [hidden]  — all keywords "
+              "must match (case-insensitive); searches titles + full conversation text; "
+              "'all' includes command-runner sessions, 'hidden' includes hidden ones")
         return 1
     sessions = load_sessions()
     rows = search_sessions(sessions, keywords, within, show_all=show_all)
-    text, ordered = render_search(rows, sessions, keywords, load_hidden())
+    hidden = load_hidden()
+    n_excluded = 0
+    if not show_hidden:
+        n_excluded = sum(1 for r in rows if r["sid"] in hidden)
+        rows = [r for r in rows if r["sid"] not in hidden]
+    text, ordered = render_search(rows, sessions, keywords, hidden, n_excluded)
     print(text)
     write_last_tree(ordered, sessions)
     return 0

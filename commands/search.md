@@ -1,6 +1,6 @@
 ---
 description: Full-text search across all conversations (AND keywords, case-insensitive; result indices work with /checkout and /hide)
-argument-hint: "<keyword> [more…] [10d|3h|2w]"
+argument-hint: "<keyword> [more…] [10d|3h|2w] [all] [hidden]"
 allowed-tools: Bash(python3 *)
 effort: low
 ---

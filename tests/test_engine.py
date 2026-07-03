@@ -410,6 +410,27 @@ class TestSearch(unittest.TestCase):
         # search results renumber the [n] index space used by checkout/hide
         self.assertEqual(cc_tree.resolve("0")[0], "grand")
 
+    def test_hidden_sessions_excluded_by_default(self):
+        hp = cc_tree._hidden_path()
+        try:
+            cc_tree.save_hidden({"pref"})
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                cc_tree.cmd_search(["database"])
+            out = buf.getvalue()
+            self.assertNotIn("pref", out)                    # excluded from results
+            self.assertIn("1 hidden match", out)             # but footer says why
+            self.assertIn("'hidden'", out)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                cc_tree.cmd_search(["database", "hidden"])   # opt in
+            out = buf.getvalue()
+            self.assertIn("pref", out)
+            self.assertIn("(hidden)", out)
+        finally:
+            if os.path.exists(hp):
+                os.remove(hp)
+
     def test_cmd_search_requires_keywords(self):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
