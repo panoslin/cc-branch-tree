@@ -3,7 +3,6 @@ description: Copy a branch's in-session /resume command to the clipboard (paste 
 argument-hint: "<index | session-id prefix | name fragment>"
 disable-model-invocation: true
 allowed-tools: Bash(python3 *)
-model: haiku
 effort: low
 ---
 Output the result below verbatim as your entire reply — no code fences, no backticks, no extra text:

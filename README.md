@@ -37,7 +37,7 @@ Either way, restart the session to pick up changes to command (`.md`) files; `sc
 
 ```
 .claude-plugin/plugin.json   manifest
-commands/                    /tree, /checkout, /hide, /unhide (markdown skills, pinned to haiku + low effort)
+commands/                    /tree, /search, /checkout, /hide, /unhide (markdown skills, effort: low)
 scripts/cc_tree.py           parser, fork-tree builder, renderer, resolver (Python 3 stdlib, zero deps)
 scripts/launch.sh            new-terminal launcher (tmux / iTerm / Terminal)
 tests/                       unittest suite + synthetic fixtures
