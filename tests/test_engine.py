@@ -375,6 +375,23 @@ class TestSearch(unittest.TestCase):
         rows = cc_tree.search_sessions(self.sessions, ["hello"], within=60)
         self.assertEqual(rows, [])   # fixtures are days old
 
+    def test_snippet_prefers_users_own_words(self):
+        # kw appears in an assistant msg first, but the snippet should quote the USER
+        rows = cc_tree.search_sessions(self.sessions, ["database"])
+        self.assertEqual([r["sid"] for r in rows], ["pref"])
+        self.assertIn("migrate", rows[0]["snippet"])
+        self.assertIn("«database»", rows[0]["snippet"])
+
+    def test_render_groups_by_project_and_mutes_command_snippets(self):
+        rows = cc_tree.search_sessions(self.sessions, ["database"])
+        text, _ = cc_tree.render_search(rows, self.sessions, ["database"])
+        self.assertIn("📁 /work/proj2", text)          # project group header
+        rows = cc_tree.search_sessions(self.sessions, ["deploy"], show_all=True)
+        text, _ = cc_tree.render_search(rows, self.sessions, ["deploy"])
+        self.assertIn("/deploy", text)                         # label shown
+        self.assertNotIn("«deploy»", text)                     # but no snippet noise
+        self.assertIn("command", text)                         # header counts cmd runs
+
     def test_command_sessions_skipped_unless_show_all(self):
         # /tree-style runner sessions echo other sessions' titles -> noise by default
         rows = cc_tree.search_sessions(self.sessions, ["deploy"])

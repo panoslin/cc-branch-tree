@@ -448,11 +448,12 @@ def _snippet(text, kws, radius=30):
 
 
 def search_transcript(path, kws):
-    """Per-keyword hit counts + first matching snippet over messages TYPED in this
-    session. Fork-inherited copies (forkedFrom-stamped) are skipped so parent content
-    doesn't re-match in every fork; sidechains are skipped too."""
+    """Per-keyword hit counts + a snippet over messages TYPED in this session.
+    Fork-inherited copies (forkedFrom-stamped) are skipped so parent content doesn't
+    re-match in every fork; sidechains are skipped too. The snippet prefers the
+    user's own words (first matching human-typed message) over machine text."""
     counts = [0] * len(kws)
-    snippet = ""
+    snippet = user_snippet = ""
     with open(path, encoding="utf-8", errors="replace") as fh:
         for line in fh:
             low = line.lower()
@@ -474,9 +475,13 @@ def search_transcript(path, kws):
                 c = tl.count(k)
                 counts[i] += c
                 hit = hit or c > 0
-            if hit and not snippet:
-                snippet = _snippet(text, kws)
-    return counts, snippet
+            if hit:
+                if not snippet:
+                    snippet = _snippet(text, kws)
+                if (not user_snippet and o.get("type") == "user"
+                        and "<command-" not in line and "<local-command-" not in line):
+                    user_snippet = _snippet(text, kws)
+    return counts, (user_snippet or snippet)
 
 
 def search_sessions(sessions, keywords, within=None, now=None, show_all=False):
@@ -504,7 +509,7 @@ def search_sessions(sessions, keywords, within=None, now=None, show_all=False):
             counts = [a + b for a, b in zip(counts, tcounts)]
         if all(counts):
             rows.append({"sid": sid, "hits": sum(counts), "snippet": snippet,
-                         "last": _epoch(s.last)})
+                         "last": _epoch(s.last), "is_cmd": _is_command_session(s)})
     rows.sort(key=lambda r: (-r["hits"], -r["last"]))
     return rows
 
@@ -513,25 +518,42 @@ def render_search(rows, sessions, keywords, hidden=None):
     hidden = hidden or set()
     head = "\U0001F50E %s — %d match%s" % (" ".join(keywords), len(rows),
                                                 "" if len(rows) == 1 else "es")
+    ncmd = sum(1 for r in rows if r.get("is_cmd"))
+    if ncmd:
+        head += "  (%d command run%s, shown because of 'all')" % (ncmd, "" if ncmd == 1 else "s")
     if not rows:
-        return head + "\n  (no session matches ALL keywords — try fewer)"
+        return head + "\n  (no session matches ALL keywords — try fewer)", []
     shown = rows[:SEARCH_LIMIT]
     iw = len(str(len(shown) - 1))
     tw = max(len(_idle(sessions[r["sid"]].last)) for r in shown)
+    group_order, by_cwd = [], {}          # group under 📁 headers, like /tree;
+    for r in shown:                       # groups ranked by their best hit
+        cwd = sessions[r["sid"]].cwd or "?"
+        if cwd not in by_cwd:
+            by_cwd[cwd] = []
+            group_order.append(cwd)
+        by_cwd[cwd].append(r)
     lines = [head]
-    for i, r in enumerate(shown):
-        s = sessions[r["sid"]]
-        mark = "  (hidden)" if r["sid"] in hidden else ""
-        lines.append("  [%s]  %s  %s  %s%s  — %d hit%s"
-                     % (str(i).rjust(iw), r["sid"][:8], _idle(s.last).rjust(tw),
-                        s.label, mark, r["hits"], "" if r["hits"] == 1 else "s"))
-        if r["snippet"]:
-            lines.append(" " * (iw + 6) + r["snippet"])
+    ordered, i = [], 0
+    for cwd in group_order:
+        lines.append("\U0001F4C1 %s" % cwd)
+        for r in by_cwd[cwd]:
+            s = sessions[r["sid"]]
+            mark = "  (hidden)" if r["sid"] in hidden else ""
+            lines.append("  [%s]  %s  %s  %s%s  — %d hit%s"
+                         % (str(i).rjust(iw), r["sid"][:8], _idle(s.last).rjust(tw),
+                            s.label, mark, r["hits"], "" if r["hits"] == 1 else "s"))
+            # command runs: the label (/foo) already says everything; their "snippet"
+            # is just the injected prompt template, so don't print it
+            if r["snippet"] and not r.get("is_cmd"):
+                lines.append(" " * (iw + 6) + r["snippet"])
+            ordered.append(r["sid"])
+            i += 1
     if len(rows) > len(shown):
         lines.append("  … %d more — add keywords or a time window (e.g. 10d) to narrow"
                      % (len(rows) - len(shown)))
     lines.append("  · these [n] work with /cc-branch-tree:checkout and :hide")
-    return "\n".join(lines)
+    return "\n".join(lines), ordered
 
 
 # --------------------------------------------------------------------------- resolve
@@ -793,8 +815,9 @@ def cmd_search(args):
         return 1
     sessions = load_sessions()
     rows = search_sessions(sessions, keywords, within, show_all=show_all)
-    print(render_search(rows, sessions, keywords, load_hidden()))
-    write_last_tree([r["sid"] for r in rows[:SEARCH_LIMIT]], sessions)
+    text, ordered = render_search(rows, sessions, keywords, load_hidden())
+    print(text)
+    write_last_tree(ordered, sessions)
     return 0
 
 

@@ -1,0 +1,3 @@
+{"type":"user","uuid":"pf1","parentUuid":null,"sessionId":"pref","cwd":"/work/proj2","gitBranch":"main","timestamp":"2026-06-01T00:00:00.000Z","isSidechain":false,"message":{"role":"user","content":"please configure it"}}
+{"type":"assistant","uuid":"pf2","parentUuid":"pf1","sessionId":"pref","timestamp":"2026-06-01T00:00:01.000Z","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"I opened the database console"}]}}
+{"type":"user","uuid":"pf3","parentUuid":"pf2","sessionId":"pref","timestamp":"2026-06-01T00:00:10.000Z","isSidechain":false,"message":{"role":"user","content":"great, migrate the database now"}}

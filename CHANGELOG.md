@@ -2,14 +2,14 @@
 
 ## Unreleased (v1.1 work)
 
-- **`/search <keyword> [more…] [10d|3h|2w] [all]`**: local full-text search across all conversations — AND keywords, case-insensitive, CJK-safe; matches titles + message text; skips fork-inherited copies (parent content doesn't re-match in every fork) and command-runner sessions (unless `all`); ranked by hits then recency with `«highlighted»` snippets. Result `[n]` indices are written to the shared index space, so `/checkout 2` / `/hide 0-3` operate on search results directly.
+- **`/search <keyword> [more…] [10d|3h|2w] [all]`**: local full-text search across all conversations — AND keywords, case-insensitive, CJK-safe; matches titles + message text; skips fork-inherited copies (parent content doesn't re-match in every fork) and command-runner sessions (unless `all`); ranked by hits then recency with `«highlighted»` snippets; results grouped under 📁 project headers (same visual language as /tree); snippets prefer the user's own words over machine text; command runs are listed without snippet noise and counted in the header. Result `[n]` indices are written to the shared index space, so `/checkout 2` / `/hide 0-3` operate on search results directly.
 - **`/hide` & `/unhide` selector upgrades**: index ranges (`hide 1-10`) and multi-match title substrings (`hide "标题"` hides every session whose title matches, each cascading to its sub-branches). `resolve_many()` powers both; single-target `resolve()` (checkout) keeps first-match behavior.
 
 - **Fork labels use the fork's own first message**: a forked session without a title is now labeled by the first message *typed in it* (entries without a `forkedFrom` stamp), not the inherited first message — forks of the same parent no longer all show identical labels. Cache schema versioned (`_v`) so stale cached labels are discarded.
 - **Incremental parse cache**: `load_sessions()` skips transcripts unchanged since last run via an `(mtime, size)` cache (`parse_cache.json`); warm renders ~16× faster. `CC_NO_CACHE=1` disables.
 - **Persistent install**: documented skills-dir symlink (`~/.claude/skills/cc-branch-tree` → repo) so the plugin loads every session without `--plugin-dir`.
 - `/inspect` + `/extract` (in-session `/rewind` drill-down and branch export) were built and then **removed** as not pulling their weight; the engine is back to tree/checkout/hide/unhide only.
-- 46 `unittest` cases.
+- 48 `unittest` cases.
 
 ## v0.2.0 — 2026-06-03
 
