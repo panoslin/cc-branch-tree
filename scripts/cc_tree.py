@@ -729,10 +729,10 @@ def cmd_resume(args):
         os.execv("/bin/bash", ["/bin/bash", launcher, cwd, sid])
     resume_here = "/resume %s" % sid
     new_window = 'cd "%s" && claude --resume %s' % (cwd, sid)
-    if _copy_to_clipboard(resume_here):
-        print("✓ Copied — paste into THIS prompt to switch in-session:")
-    print(resume_here)
-    print("  (new terminal in its own dir: %s)" % new_window)
+    if _copy_to_clipboard(new_window):
+        print("✓ Copied — paste into a new terminal to switch (works across projects):")
+    print(new_window)
+    print("  (same-project shortcut, paste into THIS prompt: %s)" % resume_here)
     return 0
 
 

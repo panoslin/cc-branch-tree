@@ -1,5 +1,5 @@
 ---
-description: Copy a branch's in-session /resume command to the clipboard (paste here to switch); also prints the new-terminal command
+description: Copy a branch's new-terminal `cd … && claude --resume` command to the clipboard (works across projects); also prints the in-session /resume shortcut
 argument-hint: "<index | session-id prefix | name fragment>"
 disable-model-invocation: true
 allowed-tools: Bash(python3 *)
